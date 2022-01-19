@@ -1,0 +1,6 @@
+build/
+.vscode/
+dfg-files*/
+
+*.s
+*.ll
