@@ -25,6 +25,7 @@
 #include "llvm/IR/Value.h"
 using namespace llvm;
 
+
 namespace {
   class RnPass : public ModulePass {
   public:
@@ -53,7 +54,9 @@ namespace {
   };
 } // namespace
 
+
 char RnPass::ID = 0;
+
 
 /**
  * @brief 获取指令的所在位置:"文件名:行号"
@@ -64,9 +67,13 @@ static void getDebugLoc(const Instruction *I, std::string &DbgFileName, unsigned
   if (DILocation *Loc = I->getDebugLoc()) {
     Line = Loc->getLine();
     DbgFileName = Loc->getFilename().str();
+    std::size_t Found = DbgFileName.find_last_of("/\\");
+    if (Found != std::string::npos)
+      DbgFileName = DbgFileName.substr(Found + 1);
     errs() << DbgFileName << ":" << Line << "\n";
   }
 }
+
 
 /**
  * @brief 如果是变量则获得变量的名字,是指令则获得指令的内容
@@ -91,6 +98,7 @@ StringRef RnPass::getValueName(Value *V) {
   return Result;
 }
 
+
 /**
  * @brief 画数据流图-origin
  *
@@ -101,7 +109,7 @@ void RnPass::writeDFG(raw_fd_ostream &File, Function &F) {
   /* 根据边的统计情况画图 */
   File << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
   /* Dump Node */
-  for (NodeList::iterator it = Nodes.begin(); it != Nodes.end(); it++) { // TODO: label这里改成文件名,行号之类的,需要先读懂代码
+  for (NodeList::iterator it = Nodes.begin(); it != Nodes.end(); it++) {
     if (dyn_cast<Instruction>(it->first))
       File << "\tNode" << it->first << "[shape=record, label=\"" << *(it->first) << "\"];\n";
     else
@@ -121,6 +129,7 @@ void RnPass::writeDFG(raw_fd_ostream &File, Function &F) {
   errs() << "Write Done\n";
 }
 
+
 /**
  * @brief 画数据流图-Radon
  *
@@ -131,25 +140,20 @@ void RnPass::writeDFGRn(raw_fd_ostream &File, Function &F) {
   /* 根据边的统计情况画图 */
   File << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
   /* Dump Node */
-  for (NodeList::iterator it = Nodes.begin(); it != Nodes.end(); it++) { // TODO: label这里改成文件名,行号之类的,需要先读懂代码
+  for (NodeList::iterator it = Nodes.begin(); it != Nodes.end(); it++) {
     if (dyn_cast<Instruction>(it->first))
       File << "\tNode" << it->first << "[shape=record, label=\"" << DbgLocMap[it->first] << "\"];\n";
     else
       File << "\tNode" << it->first << "[shape=record, label=\"" << it->second << "\"];\n";
   }
-  /* Dump control flow */
-  for (EdgeList::iterator it = InstEdges.begin(); it != InstEdges.end(); it++) {
-    File << "\tNode" << it->first.first << " -> Node" << it->second.first << "\n";
-  }
   /*Dump data flow*/
-  File << "edge [color=red]"
-       << "\n";
   for (EdgeList::iterator it = Edges.begin(); it != Edges.end(); it++) {
-    File << "\tNode" << it->first.first << " -> Node" << it->second.first << "\n";
+    File << "\tNode" << it->first.first << " -> Node" << it->second.first << " [color=red]\n";
   }
   File << "}\n";
   errs() << "Write Done\n";
 }
+
 
 /**
  * @brief 重写runOnModule,在编译被测对象的过程中获取数据流图
@@ -220,6 +224,7 @@ bool RnPass::runOnModule(Module &M) {
         }
 
         /* 更新map,将指令和其所在位置对应起来 */
+        // TODO: DbgFileName为空时...
         std::string DbgFileName("RnInit");
         unsigned Line = 0;
         getDebugLoc(CurI, DbgFileName, Line); //获取指令所在的文件名与行号
@@ -239,9 +244,9 @@ bool RnPass::runOnModule(Module &M) {
     }
 
     /* Debugging ... */
-    for (std::unordered_map<Value *, std::string>::iterator it = DbgLocMap.begin(); it != DbgLocMap.end(); it++) {
-      errs() << *(it->first) << ":" << it->second << "\n";
-    }
+    // for (std::unordered_map<Value *, std::string>::iterator it = DbgLocMap.begin(); it != DbgLocMap.end(); it++) {
+    //   errs() << *(it->first) << ":" << it->second << "\n";
+    // }
 
     /* 画数据流图 */
     writeDFG(File, F);
@@ -252,6 +257,7 @@ bool RnPass::runOnModule(Module &M) {
   }
   return false;
 }
+
 
 /* 注册Pass */
 static void registerRnPass(const PassManagerBuilder &, legacy::PassManagerBase &PM) {

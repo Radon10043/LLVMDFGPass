@@ -4,3 +4,4 @@ dfg-files*/
 
 *.s
 *.ll
+*.out
