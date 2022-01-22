@@ -29,7 +29,7 @@ using namespace llvm;
 namespace {
   class RnPass : public ModulePass {
   public:
-    typedef std::pair<Value *, StringRef> Node; //指令的节点. v是?
+    typedef std::pair<Value *, StringRef> Node; //指令的节点
     typedef std::pair<Node, Node> Edge;         //指令与指令之间的边,用于表示控制流?
     typedef std::list<Node> NodeList;           //指令的集合
     typedef std::list<Edge> EdgeList;           //边的集合
@@ -48,8 +48,8 @@ namespace {
     }
 
     StringRef getValueName(Value *V);
+    void writeDFG_origin(raw_fd_ostream &File, Function &F);
     void writeDFG(raw_fd_ostream &File, Function &F);
-    void writeDFGRn(raw_fd_ostream &File, Function &F);
     bool runOnModule(Module &M) override;
   };
 } // namespace
@@ -67,10 +67,14 @@ static void getDebugLoc(const Instruction *I, std::string &DbgFileName, unsigned
   if (DILocation *Loc = I->getDebugLoc()) {
     Line = Loc->getLine();
     DbgFileName = Loc->getFilename().str();
-    std::size_t Found = DbgFileName.find_last_of("/\\");
-    if (Found != std::string::npos)
-      DbgFileName = DbgFileName.substr(Found + 1);
-    errs() << DbgFileName << ":" << Line << "\n";
+
+    if (DbgFileName.empty()) {
+      DILocation *oDILoc = Loc->getInlinedAt();
+      if (oDILoc) {
+        Line = oDILoc->getLine();
+        DbgFileName = oDILoc->getFilename().str();
+      }
+    }
   }
 }
 
@@ -105,7 +109,7 @@ StringRef RnPass::getValueName(Value *V) {
  * @param File
  * @param F
  */
-void RnPass::writeDFG(raw_fd_ostream &File, Function &F) {
+void RnPass::writeDFG_origin(raw_fd_ostream &File, Function &F) {
   /* 根据边的统计情况画图 */
   File << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
   /* Dump Node */
@@ -136,7 +140,7 @@ void RnPass::writeDFG(raw_fd_ostream &File, Function &F) {
  * @param File
  * @param F
  */
-void RnPass::writeDFGRn(raw_fd_ostream &File, Function &F) {
+void RnPass::writeDFG(raw_fd_ostream &File, Function &F) {
   /* 根据边的统计情况画图 */
   File << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
   /* Dump Node */
@@ -164,24 +168,18 @@ void RnPass::writeDFGRn(raw_fd_ostream &File, Function &F) {
  */
 bool RnPass::runOnModule(Module &M) {
   /* 创建存储dfg图的文件夹 */
-  std::string dfgFilesFolder = "./dfg-files";
+  std::string dfgFilesFolder = "./dfg-files-origin";
   if (sys::fs::create_directory(dfgFilesFolder)) {
     errs() << "Could not create directory: " << dfgFilesFolder << "\n";
   }
-  dfgFilesFolder = "./dfg-files-rn";
+  dfgFilesFolder = "./dfg-files";
   if (sys::fs::create_directory(dfgFilesFolder)) {
     errs() << "Could not create directory: " << dfgFilesFolder << "\n";
   }
 
   /* 获取每个函数的dfg */
   for (auto &F : M) {
-    std::error_code EC;
-    std::string FileName("./dfg-files/dfg." + F.getName().str() + ".dot");
-    raw_fd_ostream File(FileName, EC, sys::fs::F_None); //原本的文件输出
-
-    std::string FileNameRn = "./dfg-files-rn/dfg." + F.getName().str() + ".dot";
-    raw_fd_ostream FileRn(FileNameRn, EC, sys::fs::F_None); //我的文件输出
-
+    // TODO: BlackList, external libs
     Edges.clear();
     Nodes.clear();
     InstEdges.clear();
@@ -222,13 +220,23 @@ bool RnPass::runOnModule(Module &M) {
             break;
           }
         }
+        // Alloca指令用于栈空间的分配 (来源: https://llvm.org/docs/LangRef.html)
+        // GetElement指令仅提供指针的计算, 并不会访问内存 (来源: https://llvm.org/docs/GetElementPtr.html)
+        // Fence指令用于对内存操作进行排序 (来源: https://llvm.org/doxygen/classllvm_1_1FenceInst.html)
+        // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
+        // TODO: AtomicRMW指令用于原子地修改内存 (对应的源码是怎样的?)
 
         /* 更新map,将指令和其所在位置对应起来 */
-        // TODO: DbgFileName为空时...
-        std::string DbgFileName("RnInit");
+        std::string DbgFileName("");
         unsigned Line = 0;
-        getDebugLoc(CurI, DbgFileName, Line); //获取指令所在的文件名与行号
-        DbgLocMap[CurI] = DbgFileName + ":" + std::to_string(Line);
+        getDebugLoc(CurI, DbgFileName, Line);                //获取指令所在的文件名与行号
+        std::size_t found = DbgFileName.find_last_of("/\\"); //只保留文件名:行号
+        if (found != std::string::npos)
+          DbgFileName = DbgFileName.substr(found + 1);
+        if (DbgFileName.empty() || !Line) //如果获取不到文件名或行号的话,label变为undefined
+          DbgLocMap[CurI] = "undefined";
+        else
+          DbgLocMap[CurI] = DbgFileName + ":" + std::to_string(Line);
 
         BasicBlock::iterator Next = I;
         Nodes.push_back(Node(CurI, getValueName(CurI)));
@@ -249,8 +257,15 @@ bool RnPass::runOnModule(Module &M) {
     // }
 
     /* 画数据流图 */
-    writeDFG(File, F);
-    writeDFGRn(FileRn, F);
+    std::error_code EC;
+    std::string FileName("./dfg-files-origin/dfg." + F.getName().str() + ".dot");
+    raw_fd_ostream File(FileName, EC, sys::fs::F_None); //原本的文件输出
+
+    std::string FileNameRn = "./dfg-files/dfg." + F.getName().str() + ".dot";
+    raw_fd_ostream FileRn(FileNameRn, EC, sys::fs::F_None); //我的文件输出
+
+    writeDFG_origin(File, F);
+    writeDFG(FileRn, F);
     File.close();
     FileRn.close();
     errs() << "Write Done\n";
