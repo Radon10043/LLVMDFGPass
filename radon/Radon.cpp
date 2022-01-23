@@ -2,6 +2,7 @@
 #include <list>
 #include <string>
 #include <unordered_map>
+#include <fstream>
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -76,6 +77,34 @@ static void getDebugLoc(const Instruction *I, std::string &DbgFileName, unsigned
       }
     }
   }
+}
+
+
+/**
+ * @brief Blacklist
+ *
+ * @param F
+ * @return true
+ * @return false
+ */
+static bool isBlacklisted(const Function *F) {
+  static const SmallVector<std::string, 8> Blacklist = {
+      "asan.",
+      "llvm.",
+      "sancov.",
+      "__ubsan_handle_",
+      "free",
+      "malloc",
+      "calloc",
+      "realloc"};
+
+  for (auto const &BlacklistFunc : Blacklist) {
+    if (F->getName().startswith(BlacklistFunc)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 
@@ -177,9 +206,16 @@ bool RnPass::runOnModule(Module &M) {
     errs() << "Could not create directory: " << dfgFilesFolder << "\n";
   }
 
+  /* 获得源码中的函数调用信息, 表现形式为: 文件名:行号, 调用的函数 */
+  std::ofstream linecalls("./dfg-files/linecalls.txt", std::ofstream::out | std::ofstream::app);
+
   /* 获取每个函数的dfg */
   for (auto &F : M) {
-    // TODO: BlackList, external libs
+    /* Black list of function names */
+    if (isBlacklisted(&F)) {
+      continue;
+    }
+
     Edges.clear();
     Nodes.clear();
     InstEdges.clear();
@@ -187,8 +223,17 @@ bool RnPass::runOnModule(Module &M) {
     errs() << "===============" << F.getName() << "===============\n";
     for (Function::iterator BB = F.begin(); BB != F.end(); BB++) { //使用迭代器遍历Function,如果用"auto& BB : F"的话后续的一些操作无法进行
       BasicBlock *CurBB = &*BB;                                    //将迭代器转换为指针(没找到能将指针转换为迭代器的方法)
+      std::string filename;
+      unsigned line;
       for (BasicBlock::iterator I = CurBB->begin(); I != CurBB->end(); I++) {
         Instruction *CurI = &*I;
+
+        /* Don't worry about external libs */
+        getDebugLoc(CurI, filename, line);
+        static const std::string Xlibs("/usr/");
+        if (filename.empty() || line == 0 || !filename.compare(0, Xlibs.size(), Xlibs))
+          continue;
+
         switch (CurI->getOpcode()) { //根据博客所述,在IR中只有load和store指令直接与内存接触,所以通过它们获取数据流的边
           case Instruction::Load: {
             LoadInst *LInst = dyn_cast<LoadInst>(CurI);     // dyn_cast用于检查操作数是否属于指定类型,在这里是检查CurI是否属于LoadInst型.如果是的话就返回指向它的指针,不是的话返回空指针
@@ -225,6 +270,17 @@ bool RnPass::runOnModule(Module &M) {
         // Fence指令用于对内存操作进行排序 (来源: https://llvm.org/doxygen/classllvm_1_1FenceInst.html)
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
         // TODO: AtomicRMW指令用于原子地修改内存 (对应的源码是怎样的?)
+
+        /* 获取函数调用信息 */
+        if (auto *c = dyn_cast<CallInst>(CurI)) {
+          std::size_t found = filename.find_last_of("/\\");
+          if (found != std::string::npos)
+            filename = filename.substr(found + 1);
+          if (auto *CalledF = c->getCalledFunction()) {
+            if (!isBlacklisted(CalledF))
+              linecalls << filename << ":" << line << "," << CalledF->getName().str() << "\n";
+          }
+        }
 
         /* 更新map,将指令和其所在位置对应起来 */
         std::string DbgFileName("");
