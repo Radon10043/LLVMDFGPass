@@ -1,8 +1,8 @@
+#include <fstream>
 #include <iostream>
 #include <list>
 #include <string>
 #include <unordered_map>
-#include <fstream>
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -62,21 +62,39 @@ char RnPass::ID = 0;
 /**
  * @brief 获取指令的所在位置:"文件名:行号"
  *
- * @param I 指令
+ * @param I
+ * @param Filename
+ * @param Line
  */
-static void getDebugLoc(const Instruction *I, std::string &DbgFileName, unsigned &Line) {
+static void getDebugLoc(const Instruction *I, std::string &Filename, unsigned &Line) {
+#ifdef LLVM_OLD_DEBUG_API
+  DebugLoc Loc = I->getDebugLoc();
+  if (!Loc.isUnknown()) {
+    DILocation cDILoc(Loc.getAsMDNode(M.getContext()));
+    DILocation oDILoc = cDILoc.getOrigLocation();
+
+    Line = oDILoc.getLineNumber();
+    Filename = oDILoc.getFilename().str();
+
+    if (filename.empty()) {
+      Line = cDILoc.getLineNumber();
+      Filename = cDILoc.getFilename().str();
+    }
+  }
+#else
   if (DILocation *Loc = I->getDebugLoc()) {
     Line = Loc->getLine();
-    DbgFileName = Loc->getFilename().str();
+    Filename = Loc->getFilename().str();
 
-    if (DbgFileName.empty()) {
+    if (Filename.empty()) {
       DILocation *oDILoc = Loc->getInlinedAt();
       if (oDILoc) {
         Line = oDILoc->getLine();
-        DbgFileName = oDILoc->getFilename().str();
+        Filename = oDILoc->getFilename().str();
       }
     }
   }
+#endif /* LLVM_OLD_DEBUG_API */
 }
 
 
@@ -271,11 +289,13 @@ bool RnPass::runOnModule(Module &M) {
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
         // TODO: AtomicRMW指令用于原子地修改内存 (对应的源码是怎样的?)
 
+        /* 仅保留文件名 */
+        std::size_t found = filename.find_last_of("/\\");
+        if (found != std::string::npos)
+          filename = filename.substr(found + 1);
+
         /* 获取函数调用信息 */
         if (auto *c = dyn_cast<CallInst>(CurI)) {
-          std::size_t found = filename.find_last_of("/\\");
-          if (found != std::string::npos)
-            filename = filename.substr(found + 1);
           if (auto *CalledF = c->getCalledFunction()) {
             if (!isBlacklisted(CalledF))
               linecalls << filename << ":" << line << "," << CalledF->getName().str() << "\n";
@@ -283,16 +303,10 @@ bool RnPass::runOnModule(Module &M) {
         }
 
         /* 更新map,将指令和其所在位置对应起来 */
-        std::string DbgFileName("");
-        unsigned Line = 0;
-        getDebugLoc(CurI, DbgFileName, Line);                //获取指令所在的文件名与行号
-        std::size_t found = DbgFileName.find_last_of("/\\"); //只保留文件名:行号
-        if (found != std::string::npos)
-          DbgFileName = DbgFileName.substr(found + 1);
-        if (DbgFileName.empty() || !Line) //如果获取不到文件名或行号的话,label变为undefined
+        if (filename.empty() || !line) //如果获取不到文件名或行号的话,label变为undefined
           DbgLocMap[CurI] = "undefined";
         else
-          DbgLocMap[CurI] = DbgFileName + ":" + std::to_string(Line);
+          DbgLocMap[CurI] = filename + ":" + std::to_string(line);
 
         BasicBlock::iterator Next = I;
         Nodes.push_back(Node(CurI, getValueName(CurI)));
@@ -320,8 +334,10 @@ bool RnPass::runOnModule(Module &M) {
     std::string FileNameRn = "./dfg-files/dfg." + F.getName().str() + ".dot";
     raw_fd_ostream FileRn(FileNameRn, EC, sys::fs::F_None); //我的文件输出
 
-    writeDFG_origin(File, F);
-    writeDFG(FileRn, F);
+    if (!EC) {
+      writeDFG_origin(File, F);
+      writeDFG(FileRn, F);
+    }
     File.close();
     FileRn.close();
     errs() << "Write Done\n";
