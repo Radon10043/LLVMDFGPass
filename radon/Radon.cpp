@@ -285,9 +285,9 @@ bool RnPass::runOnModule(Module &M) {
         }
         // Alloca指令用于栈空间的分配 (来源: https://llvm.org/docs/LangRef.html)
         // GetElement指令仅提供指针的计算, 并不会访问内存 (来源: https://llvm.org/docs/GetElementPtr.html)
-        // Fence指令用于对内存操作进行排序 (来源: https://llvm.org/doxygen/classllvm_1_1FenceInst.html)
+        // Fence指令用于对内存操作进行排序 (c++才有? 来源: https://llvm.org/doxygen/classllvm_1_1FenceInst.html)
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
-        // TODO: AtomicRMW指令用于原子地修改内存 (对应的源码是怎样的?)
+        // AtomicRMW指令: 原子指令好像只在c++或java里有(例如unordered_map), 因为被测对象是C所以不用考虑(来源同Alloca, 待验证)
 
         /* 仅保留文件名 */
         std::size_t found = filename.find_last_of("/\\");
@@ -327,20 +327,22 @@ bool RnPass::runOnModule(Module &M) {
     // }
 
     /* 画数据流图 */
-    std::error_code EC;
-    std::string FileName("./dfg-files-origin/dfg." + F.getName().str() + ".dot");
-    raw_fd_ostream File(FileName, EC, sys::fs::F_None); //原本的文件输出
+    if (!Nodes.empty()) {
+      std::error_code EC;
+      std::string FileName("./dfg-files-origin/dfg." + F.getName().str() + ".dot");
+      raw_fd_ostream File(FileName, EC, sys::fs::F_None); //原本的文件输出
 
-    std::string FileNameRn = "./dfg-files/dfg." + F.getName().str() + ".dot";
-    raw_fd_ostream FileRn(FileNameRn, EC, sys::fs::F_None); //我的文件输出
+      std::string FileNameRn = "./dfg-files/dfg." + F.getName().str() + ".dot";
+      raw_fd_ostream FileRn(FileNameRn, EC, sys::fs::F_None); //我的文件输出
 
-    if (!EC) {
-      writeDFG_origin(File, F);
-      writeDFG(FileRn, F);
+      if (!EC) {
+        writeDFG_origin(File, F);
+        writeDFG(FileRn, F);
+      }
+      File.close();
+      FileRn.close();
+      errs() << "Write Done\n";
     }
-    File.close();
-    FileRn.close();
-    errs() << "Write Done\n";
   }
   return false;
 }
