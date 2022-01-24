@@ -241,15 +241,15 @@ bool RnPass::runOnModule(Module &M) {
     errs() << "===============" << F.getName() << "===============\n";
     for (Function::iterator BB = F.begin(); BB != F.end(); BB++) { //使用迭代器遍历Function,如果用"auto& BB : F"的话后续的一些操作无法进行
       BasicBlock *CurBB = &*BB;                                    //将迭代器转换为指针(没找到能将指针转换为迭代器的方法)
-      std::string filename;
-      unsigned line;
       for (BasicBlock::iterator I = CurBB->begin(); I != CurBB->end(); I++) {
         Instruction *CurI = &*I;
 
         /* Don't worry about external libs */
+        std::string filename;
+        unsigned line;
         getDebugLoc(CurI, filename, line);
         static const std::string Xlibs("/usr/");
-        if (filename.empty() || line == 0 || !filename.compare(0, Xlibs.size(), Xlibs))
+        if (!filename.compare(0, Xlibs.size(), Xlibs))
           continue;
 
         switch (CurI->getOpcode()) { //根据博客所述,在IR中只有load和store指令直接与内存接触,所以通过它们获取数据流的边
