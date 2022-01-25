@@ -3,6 +3,7 @@
 #include <list>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -289,6 +290,14 @@ bool RnPass::runOnModule(Module &M) {
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
         // AtomicRMW指令: 原子指令好像只在c++或java里有(例如unordered_map), 因为被测对象是C所以不用考虑(来源同Alloca, 待验证)
 
+        /* 获取指令中的变量名*/
+        std::vector<std::string> vars;
+        for (Instruction::op_iterator op = CurI->op_begin(); op != CurI->op_end(); op++) {
+          std::string varName = op->get()->getName().str();
+          if (!varName.empty())
+            vars.push_back(varName);
+        }
+
         /* 仅保留文件名 */
         std::size_t found = filename.find_last_of("/\\");
         if (found != std::string::npos)
@@ -304,9 +313,20 @@ bool RnPass::runOnModule(Module &M) {
 
         /* 更新map,将指令和其所在位置对应起来 */
         if (filename.empty() || !line) //如果获取不到文件名或行号的话,label变为undefined
-          DbgLocMap[CurI] = "undefined";
+          DbgLocMap[CurI] = "undefined:0";
         else
           DbgLocMap[CurI] = filename + ":" + std::to_string(line);
+
+        /* label中加入变量信息 */
+        bool hasVar = false;
+        DbgLocMap[CurI] += ":";
+        if (!vars.empty()) {
+          hasVar = true;
+          for (auto var : vars)
+            DbgLocMap[CurI] += var + ",";
+        }
+        if (hasVar)
+          DbgLocMap[CurI].erase(DbgLocMap[CurI].end() - 1);
 
         BasicBlock::iterator Next = I;
         Nodes.push_back(Node(CurI, getValueName(CurI)));
@@ -320,11 +340,6 @@ bool RnPass::runOnModule(Module &M) {
         InstEdges.push_back(Edge(Node(Terminator, getValueName(Terminator)), Node(First, getValueName(First))));
       }
     }
-
-    /* Debugging ... */
-    // for (std::unordered_map<Value *, std::string>::iterator it = DbgLocMap.begin(); it != DbgLocMap.end(); it++) {
-    //   errs() << *(it->first) << ":" << it->second << "\n";
-    // }
 
     /* 画数据流图 */
     if (!Nodes.empty()) {
