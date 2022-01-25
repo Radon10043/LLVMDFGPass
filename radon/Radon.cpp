@@ -290,6 +290,17 @@ bool RnPass::runOnModule(Module &M) {
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
         // AtomicRMW指令: 原子指令好像只在c++或java里有(例如unordered_map), 因为被测对象是C所以不用考虑(来源同Alloca, 待验证)
 
+        /* TODO: 调用函数时变量的传入顺序... */
+        /* DFS遍历def-use获取数据流? */
+        if (CurI->getOpcode() == Instruction::Alloca) {
+          errs() << CurI->getName() << "\n";
+          for (auto U : CurI->users()) {
+            if (Instruction* Inst = dyn_cast<Instruction>(U)) {
+              errs() << "Debug Info:" << *Inst << "\n";
+            }
+          }
+        }
+
         /* 获取指令中的变量名*/
         std::vector<std::string> vars;
         for (Instruction::op_iterator op = CurI->op_begin(); op != CurI->op_end(); op++) {
@@ -306,8 +317,14 @@ bool RnPass::runOnModule(Module &M) {
         /* 获取函数调用信息 */
         if (auto *c = dyn_cast<CallInst>(CurI)) {
           if (auto *CalledF = c->getCalledFunction()) {
-            if (!isBlacklisted(CalledF))
-              linecalls << filename << ":" << line << "," << CalledF->getName().str() << "\n";
+            if (!isBlacklisted(CalledF)) {
+              /* TODO: 函数调用的表达形式 */
+              linecalls << filename << ":" << line << "," << CalledF->getName().str() << ",";
+              for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
+                linecalls << arg->getName().str() << "-";
+              }
+              linecalls << "\n";
+            }
           }
         }
 
