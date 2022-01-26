@@ -1,8 +1,11 @@
 #include <fstream>
 #include <iostream>
 #include <list>
+#include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "llvm/IR/Function.h"
@@ -257,9 +260,9 @@ bool RnPass::runOnModule(Module &M) {
           case Instruction::Load: {
             LoadInst *LInst = dyn_cast<LoadInst>(CurI);     // dyn_cast用于检查操作数是否属于指定类型,在这里是检查CurI是否属于LoadInst型.如果是的话就返回指向它的指针,不是的话返回空指针
             Value *LoadValPtr = LInst->getPointerOperand(); //获取指针操作数?获取指向的操作数?
-            errs() << "---------------Load---------------\n";
-            errs() << *LoadValPtr << " -> " << *CurI << "\n";
-            errs() << "----------------------------------\n";
+            // errs() << "---------------Load---------------\n";
+            // errs() << *LoadValPtr << " -> " << *CurI << "\n";
+            // errs() << "----------------------------------\n";
             Edges.push_back(Edge(Node(LoadValPtr, getValueName(LoadValPtr)), Node(CurI, getValueName(CurI))));
             break;
           }
@@ -267,10 +270,10 @@ bool RnPass::runOnModule(Module &M) {
             StoreInst *SInst = dyn_cast<StoreInst>(CurI);
             Value *StoreValPtr = SInst->getPointerOperand();
             Value *StoreVal = SInst->getValueOperand();
-            errs() << "----------Store----------\n";
-            errs() << *StoreVal << " -> " << *CurI << "\n";
-            errs() << *CurI << " -> " << *StoreValPtr << "\n";
-            errs() << "-------------------------\n";
+            // errs() << "----------Store----------\n";
+            // errs() << *StoreVal << " -> " << *CurI << "\n";
+            // errs() << *CurI << " -> " << *StoreValPtr << "\n";
+            // errs() << "-------------------------\n";
             Edges.push_back(Edge(Node(StoreVal, getValueName(StoreVal)), Node(CurI, getValueName(CurI))));
             Edges.push_back(Edge(Node(CurI, getValueName(CurI)), Node(StoreValPtr, getValueName(StoreValPtr))));
             break;
@@ -290,13 +293,13 @@ bool RnPass::runOnModule(Module &M) {
         // AtomicCmpXchg指令在内存种加载一个值并与给定的值进行比较, 如果它们相等, 会尝试将新的值存储到内存中 (来源同Alloca)
         // AtomicRMW指令: 原子指令好像只在c++或java里有(例如unordered_map), 因为被测对象是C所以不用考虑(来源同Alloca, 待验证)
 
-        /* TODO: 调用函数时变量的传入顺序... */
-        /* DFS遍历def-use获取数据流? */
-        if (CurI->getOpcode() == Instruction::Alloca) {
-          errs() << CurI->getName() << "\n";
-          for (auto U : CurI->users()) {
-            if (Instruction* Inst = dyn_cast<Instruction>(U)) {
-              errs() << "Debug Info:" << *Inst << "\n";
+        /* TODO: 调用函数时参数对应的变量... */
+        if (CurI->getOpcode() == Instruction::Call) {
+          errs() << *CurI << "\n";
+          for (Instruction::op_iterator op = CurI->op_begin(); op!= CurI->op_end();op++) {
+            if (Instruction* Inst = dyn_cast<Instruction>(op)) {
+              errs() << "Debug Info: " << *Inst;
+              errs() << Inst->getName() << "\n";
             }
           }
         }

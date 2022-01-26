@@ -20,10 +20,25 @@ void func2(int p1, int p2) {
 }
 
 int main(int argc, char **argv) {
-  func();
   int a = 1, b = 2, c = 3;
   int d = 4, e = 5, f = 6;
   a = b + c;
   d = e + f;
+
+  if (a) {
+    b = 20;
+  } else {
+    b = -20;
+  }
+
+  if (d) {
+    f = 10;
+  } else {
+    f = -10;
+  }
+
+  func();
+  func1(a);
+  func2(b, f);
   return 0;
 }
