@@ -133,6 +133,7 @@ bool RnDuPass::runOnModule(Module &M) {
     if (isBlacklisted(&F))
       continue;
     std::map<Value *, std::set<Value *>> duMap; // 存储def-use关系的map, key是起点, value是终点的集合
+    std::map<Value *, std::string> dbgLocMap;   // 存储指令和其对应的在源文件中位置的map, key是指令, value是文件名+行号
     std::set<Value *> nodes;                    // 存储所有节点的集合
 
     for (auto &BB : F) {
@@ -144,6 +145,17 @@ bool RnDuPass::runOnModule(Module &M) {
         static const std::string Xlibs("/usr/");
         if (!filename.compare(0, Xlibs.size(), Xlibs))
           continue;
+
+        /* 仅保留文件名与行号 */
+        std::size_t found = filename.find_last_of("/\\");
+        if (found != std::string::npos)
+          filename = filename.substr(found + 1);
+
+        /* 将指令和对应的源文件中的位置存入map */
+        if (filename.empty() || !line)
+          dbgLocMap[&I] = "undefined";
+        else
+          dbgLocMap[&I] = filename + ":" + std::to_string(line);
 
         /* 遍历def-use链 */
         nodes.insert(&I);
@@ -166,7 +178,7 @@ bool RnDuPass::runOnModule(Module &M) {
         dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
 
         for (auto node : nodes)
-          dfg << "\tNode" << node << "[shape=record, label=\"" << *node << "\"];\n";
+          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
 
         for (auto chains : duMap)
           for (auto end : chains.second)
