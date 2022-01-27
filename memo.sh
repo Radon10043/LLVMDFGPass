@@ -10,3 +10,4 @@ clang -Xclang -load -Xclang build/radon/libRnPass.so test.c
 
 # 调用共享库时保留变量名字
 clang -S -g -fno-discard-value-names -Xclang -load -Xclang build/radon/libRnPass.so examples/1_simple/test.c
+clang -S -g -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/1_simple/test.c

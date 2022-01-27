@@ -260,9 +260,6 @@ bool RnPass::runOnModule(Module &M) {
           case Instruction::Load: {
             LoadInst *LInst = dyn_cast<LoadInst>(CurI);     // dyn_cast用于检查操作数是否属于指定类型,在这里是检查CurI是否属于LoadInst型.如果是的话就返回指向它的指针,不是的话返回空指针
             Value *LoadValPtr = LInst->getPointerOperand(); //获取指针操作数?获取指向的操作数?
-            // errs() << "---------------Load---------------\n";
-            // errs() << *LoadValPtr << " -> " << *CurI << "\n";
-            // errs() << "----------------------------------\n";
             Edges.push_back(Edge(Node(LoadValPtr, getValueName(LoadValPtr)), Node(CurI, getValueName(CurI))));
             break;
           }
@@ -270,10 +267,6 @@ bool RnPass::runOnModule(Module &M) {
             StoreInst *SInst = dyn_cast<StoreInst>(CurI);
             Value *StoreValPtr = SInst->getPointerOperand();
             Value *StoreVal = SInst->getValueOperand();
-            // errs() << "----------Store----------\n";
-            // errs() << *StoreVal << " -> " << *CurI << "\n";
-            // errs() << *CurI << " -> " << *StoreValPtr << "\n";
-            // errs() << "-------------------------\n";
             Edges.push_back(Edge(Node(StoreVal, getValueName(StoreVal)), Node(CurI, getValueName(CurI))));
             Edges.push_back(Edge(Node(CurI, getValueName(CurI)), Node(StoreValPtr, getValueName(StoreValPtr))));
             break;

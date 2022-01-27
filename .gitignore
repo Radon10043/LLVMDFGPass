@@ -1,6 +1,7 @@
 build/
 .vscode/
 dfg-files*/
+out-files/
 
 *.s
 *.ll

@@ -121,8 +121,63 @@ static bool isBlacklisted(const Function *F) {
  * @return false
  */
 bool RnDuPass::runOnModule(Module &M) {
+
+  /* 创建文件夹存储输出内容 */
+  std::string outDirectory = "./radon1/out-files";
+  if (sys::fs::create_directory(outDirectory)) {
+    errs() << "Could not create directory: " << outDirectory << "\n";
+  }
+
   for (auto &F : M) {
-    errs() << F.getName() << "\n";
+
+    if (isBlacklisted(&F))
+      continue;
+    std::map<Value *, std::set<Value *>> duMap; // 存储def-use关系的map, key是起点, value是终点的集合
+    std::set<Value *> nodes;                    // 存储所有节点的集合
+
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        /* 跳过external libs */
+        std::string filename;
+        unsigned line;
+        getDebugLoc(&I, filename, line);
+        static const std::string Xlibs("/usr/");
+        if (!filename.compare(0, Xlibs.size(), Xlibs))
+          continue;
+
+        /* 遍历def-use链 */
+        nodes.insert(&I);
+        for (auto U : I.users()) {
+          if (Instruction *inst = dyn_cast<Instruction>(U)) {
+            duMap[&I].insert(inst);
+          }
+        }
+      }
+    }
+
+    /* 画图 */
+    if (!nodes.empty()) {
+      std::error_code EC;
+      std::string filename(outDirectory + "/dfg." + F.getName().str() + ".dot");
+      raw_fd_ostream dfg(filename, EC, sys::fs::F_None);
+
+      if (!EC) {
+        dfg << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
+        dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
+
+        for (auto node : nodes)
+          dfg << "\tNode" << node << "[shape=record, label=\"" << *node << "\"];\n";
+
+        for (auto chains : duMap)
+          for (auto end : chains.second)
+            dfg << "\tNode" << chains.first << " -> Node" << end << " [color=red];\n";
+
+        dfg << "}\n";
+        errs() << "Write Done\n";
+      }
+
+      dfg.close();
+    }
   }
   return false;
 }
