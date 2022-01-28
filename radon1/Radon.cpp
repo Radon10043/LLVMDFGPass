@@ -31,6 +31,35 @@
 using namespace llvm;
 
 
+namespace llvm {
+  template <>
+  struct DOTGraphTraits<Function *> : public DefaultDOTGraphTraits {
+    DOTGraphTraits(bool isSimple = true)
+        : DefaultDOTGraphTraits(isSimple) {}
+
+    static std::string getGraphName(Function *F) {
+      return "CFG for '" + F->getName().str() + "' function";
+    }
+
+    std::string getNodeLabel(BasicBlock *Node, Function *Graph) {
+      if (!Node->getName().empty()) {
+        return Node->getName().str();
+      }
+
+      std::string Str;
+      raw_string_ostream OS(Str);
+
+      Node->printAsOperand(OS, false);
+      return OS.str();
+    }
+
+    std::string getNodeDescription(BasicBlock* Node, Function* Graph) {
+      return "Write description here";
+    }
+  };
+} // namespace llvm
+
+
 namespace {
   class RnDuPass : public ModulePass {
   public:
@@ -128,6 +157,63 @@ bool RnDuPass::runOnModule(Module &M) {
     errs() << "Could not create directory: " << outDirectory << "\n";
   }
 
+  /* CFG */
+  for (auto &F : M) {
+
+    bool hasBB = false;
+    if (isBlacklisted(&F))
+      continue;
+
+    for (auto &BB : F) {
+      std::string bbName("");
+      for (auto &I : BB) {
+        /* 跳过external libs */
+        std::string filename;
+        unsigned line;
+        getDebugLoc(&I, filename, line);
+        static const std::string Xlibs("/usr/");
+        if (!filename.compare(0, Xlibs.size(), Xlibs))
+          continue;
+
+        /* 仅保留文件名与行号 */
+        std::size_t found = filename.find_last_of("/\\");
+        if (found != std::string::npos)
+          filename = filename.substr(found + 1);
+
+        /* 设置基本块名称 */
+        if (bbName.empty() && !filename.empty() && line) {
+          bbName = filename + ":" + std::to_string(line);
+        }
+      }
+
+      /* 设置基本块名称 */
+      if (!bbName.empty()) {
+        BB.setName(bbName + ":");
+        if (!BB.hasName()) {
+          std::string newname = bbName + ":";
+          Twine t(newname);
+          SmallString<256> NameData;
+          StringRef NameRef = t.toStringRef(NameData);
+          MallocAllocator Allocator;
+          BB.setValueName(ValueName::Create(NameRef, Allocator));
+        }
+        hasBB = true;
+      }
+    }
+
+    if (hasBB) {
+      /* Print CFG */
+      std::error_code EC;
+      std::string cfgFileName = outDirectory + "/cfg." + F.getName().str() + ".dot";
+      raw_fd_ostream cfg(cfgFileName, EC, sys::fs::F_None);
+      if (!EC) {
+        WriteGraph(cfg, &F, true);
+        cfg.close();
+      }
+    }
+  }
+
+  /* DFG */
   for (auto &F : M) {
 
     if (isBlacklisted(&F))
@@ -170,15 +256,17 @@ bool RnDuPass::runOnModule(Module &M) {
     /* 画图 */
     if (!nodes.empty()) {
       std::error_code EC;
-      std::string filename(outDirectory + "/dfg." + F.getName().str() + ".dot");
-      raw_fd_ostream dfg(filename, EC, sys::fs::F_None);
+      std::string dfgname(outDirectory + "/dfg." + F.getName().str() + ".dot");
+      raw_fd_ostream dfg(dfgname, EC, sys::fs::F_None);
 
       if (!EC) {
         dfg << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
         dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
 
-        for (auto node : nodes)
-          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
+        for (auto node : nodes) {
+          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\"];\n";
+          // dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
+        }
 
         for (auto chains : duMap)
           for (auto end : chains.second)
