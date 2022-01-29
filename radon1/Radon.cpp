@@ -53,7 +53,7 @@ namespace llvm {
       return OS.str();
     }
 
-    std::string getNodeDescription(BasicBlock* Node, Function* Graph) {
+    std::string getNodeDescription(BasicBlock *Node, Function *Graph) {
       return "Write description here";
     }
   };
@@ -245,6 +245,13 @@ bool RnDuPass::runOnModule(Module &M) {
 
         /* 遍历def-use链 */
         nodes.insert(&I);
+
+        /* Debugging */
+        for (Instruction::op_iterator op = I.op_begin(); op != I.op_end(); op++) {
+          errs() << op->get()->getName() << ",";
+        }
+        errs() << "\n";
+
         for (auto U : I.users()) {
           if (Instruction *inst = dyn_cast<Instruction>(U)) {
             duMap[&I].insert(inst);
