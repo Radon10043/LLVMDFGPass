@@ -31,6 +31,11 @@
 using namespace llvm;
 
 
+/* 全局变量 */
+std::map<Value *, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <指令, <def/use, 变量>>
+std::map<Value *, std::string> dbgLocMap;                                 // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+
+
 namespace llvm {
   template <>
   struct DOTGraphTraits<Function *> : public DefaultDOTGraphTraits {
@@ -54,6 +59,13 @@ namespace llvm {
     }
 
     std::string getNodeDescription(BasicBlock *Node, Function *Graph) {
+      std::string varDesc(""); //节点的description描述变量的def/use情况
+      for (auto I = Node->begin(); I != Node->end(); I++) {
+        for (auto var : duVarMap[&*I]["def"]) {
+          errs() << var << ",";
+        }
+        errs() << "\n";
+      }
       return "Write description here";
     }
   };
@@ -142,6 +154,17 @@ static bool isBlacklisted(const Function *F) {
 }
 
 
+static void dfs(Instruction *I) {
+  for (auto U : I->users()) {
+    if (Instruction *Inst = dyn_cast<Instruction>(U)) {
+      errs() << *Inst << ",";
+      dfs(Inst);
+    }
+    errs() << "\n";
+  }
+}
+
+
 /**
  * @brief 重写runOnModule,在编译被测对象的过程中获取数据流图
  *
@@ -155,6 +178,103 @@ bool RnDuPass::runOnModule(Module &M) {
   std::string outDirectory = "./radon1/out-files";
   if (sys::fs::create_directory(outDirectory)) {
     errs() << "Could not create directory: " << outDirectory << "\n";
+  }
+
+  /* 第一次遍历, 获取指令和其对应所在源文件中的位置 */
+  for (auto &F : M) {
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        /* 跳过external libs */
+        std::string filename;
+        unsigned line;
+        getDebugLoc(&I, filename, line);
+        static const std::string Xlibs("/usr/");
+        if (!filename.compare(0, Xlibs.size(), Xlibs))
+          continue;
+
+        /* 仅保留文件名与行号 */
+        std::size_t found = filename.find_last_of("/\\");
+        if (found != std::string::npos)
+          filename = filename.substr(found + 1);
+
+        /* 将指令和对应的源文件中的位置存入map */
+        if (filename.empty() || !line) {
+          std::string varName = I.getName().str();
+          if (!varName.empty())
+            dbgLocMap[&I] = varName;
+          else
+            dbgLocMap[&I] = "undefined";
+        } else
+          dbgLocMap[&I] = filename + ":" + std::to_string(line);
+      }
+    }
+  }
+
+  /* DFG */
+  for (auto &F : M) {
+
+    if (isBlacklisted(&F))
+      continue;
+    std::map<Value *, std::set<Value *>> duMap; // 存储def-use关系的map, key是起点, value是终点的集合
+    std::set<Value *> nodes;                    // 存储所有节点的集合
+
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        /* 跳过external libs */
+        std::string filename;
+        unsigned line;
+        getDebugLoc(&I, filename, line);
+        static const std::string Xlibs("/usr/");
+        if (!filename.compare(0, Xlibs.size(), Xlibs))
+          continue;
+
+        /* 遍历def-use链 */
+        nodes.insert(&I);
+        for (auto U : I.users()) {
+          if (Instruction *inst = dyn_cast<Instruction>(U)) {
+            duMap[&I].insert(inst);
+          }
+        }
+
+        /* 变量的def-use信息 */
+        if (I.getOpcode() == Instruction::Alloca) {
+          for (auto U : I.users()) {
+            if (Instruction *Inst = dyn_cast<Instruction>(U)) {
+              if (Inst->getOpcode() == Instruction::Store)
+                duVarMap[Inst]["def"].insert(I.getName().str());
+              else
+                duVarMap[Inst]["use"].insert(I.getName().str());
+            }
+          }
+        }
+      }
+    }
+
+    /* 画图 */
+    if (!nodes.empty()) {
+      std::error_code EC;
+      std::string dfgname(outDirectory + "/dfg." + F.getName().str() + ".dot");
+      raw_fd_ostream dfg(dfgname, EC, sys::fs::F_None);
+
+      if (!EC) {
+        dfg << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
+        dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
+
+        for (auto node : nodes) {
+          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\"];\n";
+          // dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
+        }
+
+        for (auto chains : duMap)
+          for (auto end : chains.second)
+            dfg << "\tNode" << chains.first << " -> Node" << end << " [color=red];\n";
+
+        dfg << "}\n";
+        errs() << "Write Done\n";
+      }
+
+      dfg.close();
+    }
   }
 
   /* CFG */
@@ -210,80 +330,6 @@ bool RnDuPass::runOnModule(Module &M) {
         WriteGraph(cfg, &F, true);
         cfg.close();
       }
-    }
-  }
-
-  /* DFG */
-  for (auto &F : M) {
-
-    if (isBlacklisted(&F))
-      continue;
-    std::map<Value *, std::set<Value *>> duMap; // 存储def-use关系的map, key是起点, value是终点的集合
-    std::map<Value *, std::string> dbgLocMap;   // 存储指令和其对应的在源文件中位置的map, key是指令, value是文件名+行号
-    std::set<Value *> nodes;                    // 存储所有节点的集合
-
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        /* 跳过external libs */
-        std::string filename;
-        unsigned line;
-        getDebugLoc(&I, filename, line);
-        static const std::string Xlibs("/usr/");
-        if (!filename.compare(0, Xlibs.size(), Xlibs))
-          continue;
-
-        /* 仅保留文件名与行号 */
-        std::size_t found = filename.find_last_of("/\\");
-        if (found != std::string::npos)
-          filename = filename.substr(found + 1);
-
-        /* 将指令和对应的源文件中的位置存入map */
-        if (filename.empty() || !line)
-          dbgLocMap[&I] = "undefined";
-        else
-          dbgLocMap[&I] = filename + ":" + std::to_string(line);
-
-        /* 遍历def-use链 */
-        nodes.insert(&I);
-
-        /* Debugging */
-        for (Instruction::op_iterator op = I.op_begin(); op != I.op_end(); op++) {
-          errs() << op->get()->getName() << ",";
-        }
-        errs() << "\n";
-
-        for (auto U : I.users()) {
-          if (Instruction *inst = dyn_cast<Instruction>(U)) {
-            duMap[&I].insert(inst);
-          }
-        }
-      }
-    }
-
-    /* 画图 */
-    if (!nodes.empty()) {
-      std::error_code EC;
-      std::string dfgname(outDirectory + "/dfg." + F.getName().str() + ".dot");
-      raw_fd_ostream dfg(dfgname, EC, sys::fs::F_None);
-
-      if (!EC) {
-        dfg << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
-        dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
-
-        for (auto node : nodes) {
-          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\"];\n";
-          // dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
-        }
-
-        for (auto chains : duMap)
-          for (auto end : chains.second)
-            dfg << "\tNode" << chains.first << " -> Node" << end << " [color=red];\n";
-
-        dfg << "}\n";
-        errs() << "Write Done\n";
-      }
-
-      dfg.close();
     }
   }
   return false;
