@@ -32,8 +32,8 @@ using namespace llvm;
 
 
 /* 全局变量 */
-std::map<Value *, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <指令, <def/use, 变量>>
-std::map<Value *, std::string> dbgLocMap;                                 // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
+std::map<Value *, std::string> dbgLocMap;                                     // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
 
 
 namespace llvm {
@@ -59,14 +59,47 @@ namespace llvm {
     }
 
     std::string getNodeDescription(BasicBlock *Node, Function *Graph) {
-      std::string varDesc(""); //节点的description描述变量的def/use情况
+      std::set<std::string> varDescSet; // 存储当前基本块中变量的def/use信息
+      std::string nodeDesc;             // 该节点的描述内容, 实际上是varDescSet的所有内容合并, 用回车隔开
       for (auto I = Node->begin(); I != Node->end(); I++) {
-        for (auto var : duVarMap[&*I]["def"]) {
-          errs() << var << ",";
+
+        /* 获取当前指令对应的源文件位置 */
+        std::string dbgLoc = dbgLocMap[&*I];
+        if (dbgLoc == "undefined") // 跳过undefined节点
+          continue;
+
+        /* hasVar用于表示当前这个指令有没有def/use变量, 如果有的话就变为true */
+        bool hasVar = false;
+
+        /* 收集当前指令def的变量信息 */
+        std::string desc = dbgLocMap[&*I] + "-def:";
+        for (auto var : duVarMap[dbgLoc]["def"]) {
+          desc += var + ",";
+          hasVar = true;
         }
-        errs() << "\n";
+        if (hasVar) // 如果def里变量, 要去掉最后一位的","
+          desc.erase(desc.end() - 1);
+
+        /* 收集当前指令use的变量信息 */
+        hasVar = false;
+        desc += "-use:";
+        for (auto var : duVarMap[dbgLoc]["use"]) {
+          desc += var + ",";
+          hasVar = true;
+        }
+        if (hasVar) // 如果use了变量, 要去掉最后一位的","
+          desc.erase(desc.end() - 1);
+
+        varDescSet.insert(desc);
       }
-      return "Write description here";
+
+      /* 合并节点中的变量信息描述 */
+      for (auto desc : varDescSet) {
+        nodeDesc += desc + "\n";
+      }
+      nodeDesc.erase(nodeDesc.end() - 1);
+
+      return nodeDesc;
     }
   };
 } // namespace llvm
@@ -199,18 +232,15 @@ bool RnDuPass::runOnModule(Module &M) {
 
         /* 将指令和对应的源文件中的位置存入map */
         if (filename.empty() || !line) {
-          std::string varName = I.getName().str();
-          if (!varName.empty())
-            dbgLocMap[&I] = varName;
-          else
-            dbgLocMap[&I] = "undefined";
+          // std::string varName = I.getName().str();
+          dbgLocMap[&I] = "undefined";
         } else
           dbgLocMap[&I] = filename + ":" + std::to_string(line);
       }
     }
   }
 
-  /* DFG */
+  /* 第二次遍历, 与DFG相关 */
   for (auto &F : M) {
 
     if (isBlacklisted(&F))
@@ -241,9 +271,9 @@ bool RnDuPass::runOnModule(Module &M) {
           for (auto U : I.users()) {
             if (Instruction *Inst = dyn_cast<Instruction>(U)) {
               if (Inst->getOpcode() == Instruction::Store)
-                duVarMap[Inst]["def"].insert(I.getName().str());
+                duVarMap[dbgLocMap[Inst]]["def"].insert(I.getName().str());
               else
-                duVarMap[Inst]["use"].insert(I.getName().str());
+                duVarMap[dbgLocMap[Inst]]["use"].insert(I.getName().str());
             }
           }
         }
@@ -277,7 +307,7 @@ bool RnDuPass::runOnModule(Module &M) {
     }
   }
 
-  /* CFG */
+  /* 第三次遍历, 与CFG相关 */
   for (auto &F : M) {
 
     bool hasBB = false;
