@@ -187,6 +187,11 @@ static bool isBlacklisted(const Function *F) {
 }
 
 
+/**
+ * @brief 使用深度有限搜索遍历def-use链
+ *
+ * @param I
+ */
 static void dfs(Instruction *I) {
   for (auto U : I->users()) {
     if (Instruction *Inst = dyn_cast<Instruction>(U)) {
@@ -194,6 +199,19 @@ static void dfs(Instruction *I) {
       dfs(Inst);
     }
     errs() << "\n";
+  }
+}
+
+
+static void forwardSearch(Instruction *I) {
+  for (auto op = I->op_begin(); op != I->op_end(); op++) {
+    if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+      std::string varName = Inst->getName().str();
+      if (varName.empty())
+        forwardSearch(Inst);
+      else
+        errs() << varName << "\n";
+    }
   }
 }
 
@@ -266,11 +284,16 @@ bool RnDuPass::runOnModule(Module &M) {
           }
         }
 
+        /* TODO: 使用向前遍历判断变量的def-use? */
+        if (I.getOpcode() == Instruction::Call) {
+          errs() << I << "=====\n";
+          forwardSearch(&I);
+        }
+
         /* 变量的def-use信息 */
         /* TODO: 指针, 数组的def-use判断 */
         if (I.getOpcode() == Instruction::Alloca) {
           errs() << I.getName() << "\n";
-          dfs(&I);
           for (auto U : I.users()) {
             if (Instruction *Inst = dyn_cast<Instruction>(U)) {
               if (Inst->getOpcode() == Instruction::Store)
