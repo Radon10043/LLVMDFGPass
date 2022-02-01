@@ -267,7 +267,10 @@ bool RnDuPass::runOnModule(Module &M) {
         }
 
         /* 变量的def-use信息 */
+        /* TODO: 指针, 数组的def-use判断 */
         if (I.getOpcode() == Instruction::Alloca) {
+          errs() << I.getName() << "\n";
+          dfs(&I);
           for (auto U : I.users()) {
             if (Instruction *Inst = dyn_cast<Instruction>(U)) {
               if (Inst->getOpcode() == Instruction::Store)
@@ -276,6 +279,7 @@ bool RnDuPass::runOnModule(Module &M) {
                 duVarMap[dbgLocMap[Inst]]["use"].insert(I.getName().str());
             }
           }
+          errs() << "====================================\n";
         }
       }
     }
