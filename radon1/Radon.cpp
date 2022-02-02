@@ -203,14 +203,26 @@ static void dfs(Instruction *I) {
 }
 
 
-static void forwardSearch(Instruction *I) {
+/**
+ * @brief 向前搜索获得调用函数时用到的变量
+ *
+ * @param I
+ * @param vec
+ */
+static void fsearch(Instruction *I, std::vector<std::string> &vec) {
   for (auto op = I->op_begin(); op != I->op_end(); op++) {
-    if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+
+    if (dyn_cast<Constant>(op))
+      vec.push_back("");
+
+    else if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+
       std::string varName = Inst->getName().str();
+
       if (varName.empty())
-        forwardSearch(Inst);
+        fsearch(Inst, vec);
       else
-        errs() << varName << "\n";
+        vec.push_back(varName);
     }
   }
 }
@@ -231,6 +243,9 @@ bool RnDuPass::runOnModule(Module &M) {
     errs() << "Could not create directory: " << outDirectory << "\n";
   }
 
+  /* 在linecalls.txt中写入调用信息 */
+  std::ofstream linecalls(outDirectory + "/linecalls.txt", std::ofstream::out | std::ofstream::app);
+
   /* 第一次遍历, 获取指令和其对应所在源文件中的位置 */
   for (auto &F : M) {
     for (auto &BB : F) {
@@ -248,9 +263,34 @@ bool RnDuPass::runOnModule(Module &M) {
         if (found != std::string::npos)
           filename = filename.substr(found + 1);
 
+        /* 获取函数调用信息 */
+        if (auto *c = dyn_cast<CallInst>(&I)) {
+          if (auto *CalledF = c->getCalledFunction()) {
+            if (!isBlacklisted(CalledF)) {
+
+              /* 按顺序获得调用函数时其形参对应的变量 */
+              std::vector<std::string> varVec;
+              fsearch(&I, varVec);
+              int i = 0, n = varVec.size();
+
+              /* 将函数调用信息与参数对应情况写入文件 */
+              linecalls << filename << ":" << line << "-" << CalledF->getName().str() << "-";
+              for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
+                std::string argName = arg->getName().str();
+                linecalls << argName << ":";
+                if (i < n)
+                  linecalls << varVec[i];
+                if (arg + 1 != CalledF->arg_end())
+                  linecalls << ",";
+                i++;
+              }
+              linecalls << "\n";
+            }
+          }
+        }
+
         /* 将指令和对应的源文件中的位置存入map */
         if (filename.empty() || !line) {
-          // std::string varName = I.getName().str();
           dbgLocMap[&I] = "undefined";
         } else
           dbgLocMap[&I] = filename + ":" + std::to_string(line);
@@ -282,12 +322,6 @@ bool RnDuPass::runOnModule(Module &M) {
           if (Instruction *inst = dyn_cast<Instruction>(U)) {
             duMap[&I].insert(inst);
           }
-        }
-
-        /* TODO: 使用向前遍历判断变量的def-use? */
-        if (I.getOpcode() == Instruction::Call) {
-          errs() << I << "=====\n";
-          forwardSearch(&I);
         }
 
         /* 变量的def-use信息 */
