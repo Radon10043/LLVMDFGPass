@@ -209,21 +209,14 @@ static void dfs(Instruction *I) {
  * @param I
  * @param vec
  */
-static void fsearch(Instruction *I, std::vector<std::string> &vec) {
-  for (auto op = I->op_begin(); op != I->op_end(); op++) {
+static void fsearch(Instruction::op_iterator op, std::string &varName) {
 
-    if (dyn_cast<Constant>(op))
-      vec.push_back("");
+  if (Instruction *Inst = dyn_cast<Instruction>(op)) {
 
-    else if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+    varName = Inst->getName().str();
 
-      std::string varName = Inst->getName().str();
-
-      if (varName.empty())
-        fsearch(Inst, vec);
-      else
-        vec.push_back(varName);
-    }
+    for (auto op = Inst->op_begin(); op != Inst->op_end(); op++)
+      fsearch(op, varName);
   }
 }
 
@@ -270,10 +263,14 @@ bool RnDuPass::runOnModule(Module &M) {
 
               /* 按顺序获得调用函数时其形参对应的变量 */
               std::vector<std::string> varVec;
-              fsearch(&I, varVec);
-              int i = 0, n = varVec.size();
+              for (auto op = I.op_begin(); op != I.op_end(); op++) {
+                std::string varName("");
+                fsearch(op, varName);
+                varVec.push_back(varName);
+              }
 
               /* 将函数调用信息与参数对应情况写入文件 */
+              int i = 0, n = varVec.size();
               linecalls << filename << ":" << line << "-" << CalledF->getName().str() << "-";
               for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
                 std::string argName = arg->getName().str();
