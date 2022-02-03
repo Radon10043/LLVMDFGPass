@@ -188,22 +188,6 @@ static bool isBlacklisted(const Function *F) {
 
 
 /**
- * @brief 使用深度有限搜索遍历def-use链
- *
- * @param I
- */
-static void dfs(Instruction *I) {
-  for (auto U : I->users()) {
-    if (Instruction *Inst = dyn_cast<Instruction>(U)) {
-      errs() << *Inst << ",";
-      dfs(Inst);
-    }
-    errs() << "\n";
-  }
-}
-
-
-/**
  * @brief 向前搜索获得调用函数时用到的变量
  *
  * @param I
@@ -295,13 +279,11 @@ bool RnDuPass::runOnModule(Module &M) {
     }
   }
 
-  /* 第二次遍历, 与DFG相关 */
+  /* 第二次遍历, 与Data-Flow相关 */
   for (auto &F : M) {
 
     if (isBlacklisted(&F))
       continue;
-    std::map<Value *, std::set<Value *>> duMap; // 存储def-use关系的map, key是起点, value是终点的集合
-    std::set<Value *> nodes;                    // 存储所有节点的集合
 
     for (auto &BB : F) {
       for (auto &I : BB) {
@@ -313,29 +295,24 @@ bool RnDuPass::runOnModule(Module &M) {
         if (!filename.compare(0, Xlibs.size(), Xlibs))
           continue;
 
-        /* 遍历def-use链 */
-        nodes.insert(&I);
-        for (auto U : I.users()) {
-          if (Instruction *inst = dyn_cast<Instruction>(U)) {
-            duMap[&I].insert(inst);
-          }
-        }
-
         /* 分析变量的定义-使用关系 */
         std::string varName;
         switch (I.getOpcode()) {
-          case Instruction::Store: {  // Store表示对内存有修改, 所以是def
+
+          case Instruction::Store: { // Store表示对内存有修改, 所以是def
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearch(op, varName);
             duVarMap[dbgLocMap[&I]]["def"].insert(varName);
             break;
           }
-          case Instruction::BitCast: {  // TODO: 数组的初始化看起来和BitCast有关, 这么判断数组的def可以吗?
+
+          case Instruction::BitCast: { // TODO: 数组的初始化看起来和BitCast有关, 这么判断数组的def可以吗?
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearch(op, varName);
             duVarMap[dbgLocMap[&I]]["def"].insert(varName);
             break;
           }
+
           case Instruction::Load: { // load表示从内存中读取, 所以是use
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearch(op, varName);
@@ -344,32 +321,6 @@ bool RnDuPass::runOnModule(Module &M) {
           }
         }
       }
-    }
-
-    /* 画图 */
-    if (!nodes.empty()) {
-      std::error_code EC;
-      std::string dfgname(outDirectory + "/dfg." + F.getName().str() + ".dot");
-      raw_fd_ostream dfg(dfgname, EC, sys::fs::F_None);
-
-      if (!EC) {
-        dfg << "digraph \"DFG for \'" + F.getName() + "\' function\" {\n";
-        dfg << "\tlabel=\"DFG for \'" + F.getName() + "\' function\";\n\n";
-
-        for (auto node : nodes) {
-          dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\"];\n";
-          // dfg << "\tNode" << node << "[shape=record, label=\"" << dbgLocMap[node] << "\", comment=\"" << *node << "\"];\n";
-        }
-
-        for (auto chains : duMap)
-          for (auto end : chains.second)
-            dfg << "\tNode" << chains.first << " -> Node" << end << " [color=red];\n";
-
-        dfg << "}\n";
-        errs() << "Write Done\n";
-      }
-
-      dfg.close();
     }
   }
 
