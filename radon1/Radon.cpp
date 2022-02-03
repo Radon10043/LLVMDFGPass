@@ -321,19 +321,27 @@ bool RnDuPass::runOnModule(Module &M) {
           }
         }
 
-        /* 变量的def-use信息 */
-        /* TODO: 指针, 数组的def-use判断 */
-        if (I.getOpcode() == Instruction::Alloca) {
-          errs() << I.getName() << "\n";
-          for (auto U : I.users()) {
-            if (Instruction *Inst = dyn_cast<Instruction>(U)) {
-              if (Inst->getOpcode() == Instruction::Store)
-                duVarMap[dbgLocMap[Inst]]["def"].insert(I.getName().str());
-              else
-                duVarMap[dbgLocMap[Inst]]["use"].insert(I.getName().str());
-            }
+        /* 分析变量的定义-使用关系 */
+        std::string varName;
+        switch (I.getOpcode()) {
+          case Instruction::Store: {  // Store表示对内存有修改, 所以是def
+            for (auto op = I.op_begin(); op != I.op_end(); op++)
+              fsearch(op, varName);
+            duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+            break;
           }
-          errs() << "====================================\n";
+          case Instruction::BitCast: {  // TODO: 数组的初始化看起来和BitCast有关, 这么判断数组的def可以吗?
+            for (auto op = I.op_begin(); op != I.op_end(); op++)
+              fsearch(op, varName);
+            duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+            break;
+          }
+          case Instruction::Load: { // load表示从内存中读取, 所以是use
+            for (auto op = I.op_begin(); op != I.op_end(); op++)
+              fsearch(op, varName);
+            duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+            break;
+          }
         }
       }
     }
