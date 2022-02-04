@@ -70,8 +70,16 @@ namespace llvm {
 
         /* 收集当前指令def的变量信息 */
         std::string desc = dbgLocMap[&*I] + "-def:";
-        for (auto var : duVarMap[dbgLoc]["def"]) {
-          desc += var + ",";
+        for (auto &var : duVarMap[dbgLoc]["def"]) {
+
+          if (var.empty()) // 变量名为空的话就跳过
+            continue;
+
+          size_t found = var.find(".addr"); // 若变量名中有".addr"的话就去掉 (通常发生在参数传递的情况中)
+          if (found != std::string::npos)
+            desc += var.substr(0, found) + ",";
+          else
+            desc += var + ",";
         }
         if (*(desc.end() - 1) == ',')
           desc.erase(desc.end() - 1);
@@ -79,9 +87,14 @@ namespace llvm {
         /* 收集当前指令use的变量信息 */
         desc += "-use:";
         for (auto var : duVarMap[dbgLoc]["use"]) {
-          if (var.empty())
+          if (var.empty()) // 变量名为空的话就跳过
             continue;
-          desc += var + ",";
+
+          size_t found = var.find(".addr"); // 若变量名中有".addr"的话就去掉 (通常发生在参数传递的情况中)
+          if (found != std::string::npos)
+            desc += var.substr(0, found) + ",";
+          else
+            desc += var + ",";
         }
         if (*(desc.end() - 1) == ',')
           desc.erase(desc.end() - 1);
@@ -90,9 +103,8 @@ namespace llvm {
       }
 
       /* 合并节点中的变量信息描述 */
-      for (auto desc : varDescSet) {
+      for (auto desc : varDescSet)
         nodeDesc += desc + "\n";
-      }
       nodeDesc.erase(nodeDesc.end() - 1);
 
       return nodeDesc;
