@@ -231,7 +231,7 @@ bool RnDuPass::runOnModule(Module &M) {
   /* 在linecalls.txt中写入调用信息 */
   std::ofstream linecalls(outDirectory + "/linecalls.txt", std::ofstream::out | std::ofstream::app);
 
-  /* 第一次遍历, 获取指令和其对应所在源文件中的位置 */
+  /* Def-use */
   for (auto &F : M) {
     for (auto &BB : F) {
       for (auto &I : BB) {
@@ -279,29 +279,10 @@ bool RnDuPass::runOnModule(Module &M) {
         }
 
         /* 将指令和对应的源文件中的位置存入map */
-        if (filename.empty() || !line) {
+        if (filename.empty() || !line)
           dbgLocMap[&I] = "undefined";
-        } else
+        else
           dbgLocMap[&I] = filename + ":" + std::to_string(line);
-      }
-    }
-  }
-
-  /* 第二次遍历, 与Data-Flow相关 */
-  for (auto &F : M) {
-
-    if (isBlacklisted(&F))
-      continue;
-
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        /* 跳过external libs */
-        std::string filename;
-        unsigned line;
-        getDebugLoc(&I, filename, line);
-        static const std::string Xlibs("/usr/");
-        if (!filename.compare(0, Xlibs.size(), Xlibs))
-          continue;
 
         /* 分析变量的定义-使用关系 */
         std::string varName;
@@ -345,7 +326,7 @@ bool RnDuPass::runOnModule(Module &M) {
     }
   }
 
-  /* 第三次遍历, 与CFG相关 */
+  /* CFG */
   for (auto &F : M) {
 
     bool hasBB = false;
