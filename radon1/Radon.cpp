@@ -79,6 +79,8 @@ namespace llvm {
         /* 收集当前指令use的变量信息 */
         desc += "-use:";
         for (auto var : duVarMap[dbgLoc]["use"]) {
+          if (var.empty())
+            continue;
           desc += var + ",";
         }
         if (*(desc.end() - 1) == ',')
@@ -294,23 +296,36 @@ bool RnDuPass::runOnModule(Module &M) {
         switch (I.getOpcode()) {
 
           case Instruction::Store: { // Store表示对内存有修改, 所以是def
-            for (auto op = I.op_begin(); op != I.op_end(); op++)
+
+            std::vector<std::string> varNames; // 存储Store指令中变量出现的顺序
+            for (auto op = I.op_begin(); op != I.op_end(); op++) {
               fsearch(op, varName);
-            duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+              varNames.push_back(varName);
+            }
+
+            int n = varNames.size(); // 根据LLVM官网的描述, n的值应该为2, 因为Store指令有两个参数, 第一个参数是要存储的值(use), 第二个指令是要存储它的地址(def)
+            for (int i = 0; i < n - 1; i++)
+              duVarMap[dbgLocMap[&I]]["use"].insert(varNames[i]);
+            duVarMap[dbgLocMap[&I]]["def"].insert(varNames[n - 1]);
+
             break;
           }
 
           case Instruction::BitCast: { // TODO: 数组的初始化看起来和BitCast有关, 这么判断数组的def可以吗?
+
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearch(op, varName);
             duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+
             break;
           }
 
           case Instruction::Load: { // load表示从内存中读取, 所以是use
+
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearch(op, varName);
             duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+
             break;
           }
         }
