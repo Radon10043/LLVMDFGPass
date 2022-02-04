@@ -68,26 +68,20 @@ namespace llvm {
         if (dbgLoc == "undefined") // 跳过undefined节点
           continue;
 
-        /* hasVar用于表示当前这个指令有没有def/use变量, 如果有的话就变为true */
-        bool hasVar = false;
-
         /* 收集当前指令def的变量信息 */
         std::string desc = dbgLocMap[&*I] + "-def:";
         for (auto var : duVarMap[dbgLoc]["def"]) {
           desc += var + ",";
-          hasVar = true;
         }
-        if (hasVar) // 如果def里变量, 要去掉最后一位的","
+        if (*(desc.end() - 1) == ',')
           desc.erase(desc.end() - 1);
 
         /* 收集当前指令use的变量信息 */
-        hasVar = false;
         desc += "-use:";
         for (auto var : duVarMap[dbgLoc]["use"]) {
           desc += var + ",";
-          hasVar = true;
         }
-        if (hasVar) // 如果use了变量, 要去掉最后一位的","
+        if (*(desc.end() - 1) == ',')
           desc.erase(desc.end() - 1);
 
         varDescSet.insert(desc);
