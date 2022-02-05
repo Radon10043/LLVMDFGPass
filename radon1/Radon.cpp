@@ -196,19 +196,41 @@ static bool isBlacklisted(const Function *F) {
 
 
 /**
- * @brief 向前搜索获得调用函数时用到的变量
+ * @brief 向前搜索获得用到的变量名
  *
  * @param I
  * @param vec
  */
-static void fsearch(Instruction::op_iterator op, std::string &varName) {
+static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
 
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
 
     varName = Inst->getName().str();
 
     for (auto op = Inst->op_begin(); op != Inst->op_end(); op++)
-      fsearch(op, varName);
+      fsearchVar(op, varName);
+  }
+}
+
+
+/**
+ * @brief 向前搜索, 获得函数参数对应的变量集合
+ *
+ * @param op
+ * @param varName
+ * @param vars
+ */
+static void fsearchCall(Instruction::op_iterator op, std::string &varName, std::set<std::string> &vars) {
+
+  if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+
+    varName = Inst->getName().str();
+
+    for (auto op = Inst->op_begin(); op != Inst->op_end(); op++)
+      fsearchCall(op, varName, vars);
+
+  } else if (!varName.empty()) {
+    vars.insert(varName);
   }
 }
 
@@ -254,25 +276,36 @@ bool RnDuPass::runOnModule(Module &M) {
             if (!isBlacklisted(CalledF)) {
 
               /* 按顺序获得调用函数时其形参对应的变量 */
-              std::vector<std::string> varVec;
+              std::vector<std::set<std::string>> varVec;
               for (auto op = I.op_begin(); op != I.op_end(); op++) {
+                std::set<std::string> vars; // 形参对应的变量可能是多个, 所以存到一个集合中
                 std::string varName("");
-                fsearch(op, varName);
-                varVec.push_back(varName);
+                fsearchCall(op, varName, vars);
+                varVec.push_back(vars);
               }
 
               /* 将函数调用信息与参数对应情况写入文件 */
               int i = 0, n = varVec.size();
               linecalls << filename << ":" << line << "-" << CalledF->getName().str() << "-";
               for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
+
                 std::string argName = arg->getName().str();
                 linecalls << argName << ":";
-                if (i < n)
-                  linecalls << varVec[i];
+
+                if (i < n) {
+                  std::string varStr;
+                  for (auto var : varVec[i])
+                    varStr += var + "|"; // 如果形参对应的变量是多个, 用"|"隔开
+                  if (*(varStr.end() - 1) == '|')
+                    varStr.erase(varStr.end() - 1); // 去掉结尾的"|"
+                  linecalls << varStr;
+                }
+                i++;
+
                 if (arg + 1 != CalledF->arg_end())
                   linecalls << ",";
-                i++;
               }
+
               linecalls << "\n";
             }
           }
@@ -292,7 +325,7 @@ bool RnDuPass::runOnModule(Module &M) {
 
             std::vector<std::string> varNames; // 存储Store指令中变量出现的顺序
             for (auto op = I.op_begin(); op != I.op_end(); op++) {
-              fsearch(op, varName);
+              fsearchVar(op, varName);
               varNames.push_back(varName);
             }
 
@@ -307,7 +340,7 @@ bool RnDuPass::runOnModule(Module &M) {
           case Instruction::BitCast: { // TODO: 数组的初始化看起来和BitCast有关, 这么判断数组的def可以吗?
 
             for (auto op = I.op_begin(); op != I.op_end(); op++)
-              fsearch(op, varName);
+              fsearchVar(op, varName);
             duVarMap[dbgLocMap[&I]]["def"].insert(varName);
 
             break;
@@ -316,7 +349,7 @@ bool RnDuPass::runOnModule(Module &M) {
           case Instruction::Load: { // load表示从内存中读取, 所以是use
 
             for (auto op = I.op_begin(); op != I.op_end(); op++)
-              fsearch(op, varName);
+              fsearchVar(op, varName);
             duVarMap[dbgLocMap[&I]]["use"].insert(varName);
 
             break;
