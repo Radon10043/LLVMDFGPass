@@ -3,6 +3,8 @@ build/
 dfg-files*/
 out-files/
 
+pyscripts/taintTargets.txt
+
 *.s
 *.ll
 *.out
