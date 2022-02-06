@@ -81,9 +81,50 @@ def getInfo(dotPath: str, taintPath: str):
     return dotfileList, callDict, taintQueue
 
 
+def getGraphDict(dotfileList: list) -> dict:
+    """获得存储cfg信息的字典
+
+    Parameters
+    ----------
+    dotfileList : list
+        存储所有dot文件路径的列表
+
+    Returns
+    -------
+    dict
+        存储cfg信息的字典, 结构: <函数名, <"dot"或"nx", dot图或nx图>>
+
+    Notes
+    -----
+    [description]
+    """
+    graphDict = dict()  # <函数名, <"dot"或"nx", dot图或nx图>>
+
+    for dotfile in dotfileList:
+
+        funcName = dotfile.split("/")[-1].split(".")[1]
+        graphDict[funcName] = dict()
+
+        cfgDot = pydot.graph_from_dot_file(dotfile)
+        cfgDot = cfgDot[0]
+
+        cfgNx = nx.drawing.nx_pydot.from_pydot(cfgDot)
+
+        graphDict[funcName]["dot"] = cfgDot
+        graphDict[funcName]["nx"] = cfgNx
+
+    return graphDict
+
+
+# TODO: 向前向后搜索, 根据变量的定义使用关系标记BB
+def analyze(graphDict: dict, callDict: dict, taintQueue: queue.Queue):
+    pass
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dots", help="存储dot图的文件夹", required=True)
     parser.add_argument("-t", "--taint", help="存储污点源信息的txt文件", required=True)
     args = parser.parse_args()
     dotfileList, callDict, taintQueue = getInfo(args.dots, args.taint)
+    graphDict = getGraphDict(dotfileList)
