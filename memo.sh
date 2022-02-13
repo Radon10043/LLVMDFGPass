@@ -12,3 +12,4 @@ clang -Xclang -load -Xclang build/radon/libRnPass.so test.c
 clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon/libRnPass.so examples/1_simple/test.c -o examples/1_simple/test.ll
 clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/1_simple/test.c -o examples/1_simple/test.ll
 clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/3_ptrAndArr/ptr_arr.c -o examples/3_ptrAndArr/ptr_arr.ll
+clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/4_sample/sample.c -o examples/4_sample/sample.ll
