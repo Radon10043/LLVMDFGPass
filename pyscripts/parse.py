@@ -99,6 +99,8 @@ def getGraphDict(dotfileList: list) -> dict:
     [description]
     """
     graphDict = dict()  # <函数名, <"dot"或"nx", dot图或nx图>>
+    bbDict = dict()  # <bbname, <def或use, {varname}>>
+    # <bbid, bbname>?
 
     for dotfile in dotfileList:
 
@@ -112,6 +114,36 @@ def getGraphDict(dotfileList: list) -> dict:
 
         graphDict[funcName]["dot"] = cfgDot
         graphDict[funcName]["nx"] = cfgNx
+
+        nodes = cfgDot.get_nodes()
+        for node in nodes:
+            nodeLabel = node.obj_dict["attributes"]["label"]
+            bbid = node.obj_dict["name"]
+
+            nodeLabel = nodeLabel.lstrip("\"{").rstrip("}\"")
+            nodeLabel = nodeLabel.replace("\\n", "\n")
+
+            bbname, bbdesc = nodeLabel.split("|")
+            bbname = bbname.rstrip(":")
+            bbdesc = bbdesc.split("\n")
+
+            bbDict[bbname] = dict()
+            for desc in bbdesc:
+                line, defVars, useVars = desc.split("-")
+
+                defVars = defVars.lstrip("def:").split(",")
+                defVars = set(defVars)
+
+                useVars = useVars.lstrip("use:").split(",")
+                useVars = set(useVars)
+
+                if not bbDict[bbname]:
+                    bbDict[bbname]["def"] = set()
+                    bbDict[bbname]["use"] = set()
+                bbDict[bbname]["def"] |= defVars    # 集合合并
+                bbDict[bbname]["use"] |= useVars
+
+            bbDict[bbname]["id"] = bbid
 
     return graphDict
 

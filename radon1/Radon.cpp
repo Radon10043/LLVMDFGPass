@@ -207,8 +207,11 @@ static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
 
     varName = Inst->getName().str();
 
-    for (auto op = Inst->op_begin(); op != Inst->op_end(); op++)
-      fsearchVar(op, varName);
+    if (Inst->getOpcode() == Instruction::PHI) // ?
+      return;
+
+    for (auto nop = Inst->op_begin(); nop != Inst->op_end(); nop++)
+      fsearchVar(nop, varName);
   }
 }
 
@@ -351,6 +354,16 @@ bool RnDuPass::runOnModule(Module &M) {
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearchVar(op, varName);
             duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+
+            break;
+          }
+
+          case Instruction::Call: { // 调用函数时用到的变量也加入到def-use的map中
+
+            for (auto op = I.op_begin(); op != I.op_end(); op++) {
+              fsearchVar(op, varName);
+              duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+            }
 
             break;
           }
