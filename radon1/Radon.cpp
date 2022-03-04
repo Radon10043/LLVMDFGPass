@@ -203,6 +203,9 @@ static bool isBlacklisted(const Function *F) {
  */
 static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
 
+  if (GlobalVariable* GV = dyn_cast<GlobalVariable>(op))
+    varName = GV->getName().str();
+
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
 
     varName = Inst->getName().str();
@@ -224,6 +227,9 @@ static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
  * @param vars
  */
 static void fsearchCall(Instruction::op_iterator op, std::string &varName, std::set<std::string> &vars) {
+
+  if (GlobalVariable* GV = dyn_cast<GlobalVariable>(op))
+    varName = GV->getName().str();
 
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
 
