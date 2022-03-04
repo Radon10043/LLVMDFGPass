@@ -1,27 +1,22 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int main(int argc, char **argv) {
-  char ch0 = 'g', ch1 = 'o', ch2 = 'o', ch3 = 'd';
-  int ofst0 = 0, ofst1 = 0, ofst2 = 0, ofst3;
+  char str[5] = "sad!";
+  int ofst = 0;
+  scanf("%d", &ofst);
 
-  scanf("%d,%d,%d,%d", &ofst0, &ofst1, &ofst2, &ofst3); // 5,14,11,67
+  if (ofst > 0 && ofst < 19)
+    str[0] -= ofst;
+  else
+    printf("After offset will not be alpha, stop.\n");
 
-  if (ch0 - ofst0 >= 'a' && ch0 - ofst0 <= 'z')
-    ch0 -= ofst0;
-  if (ch1 - ofst1 >= 'a' && ch1 - ofst1 <= 'z')
-    ch1 -= ofst1;
-  if (ch2 - ofst2 >= 'a' && ch2 - ofst2 <= 'z')
-    ch2 -= ofst2;
-  if (ch3 - ofst3 >= 0 && ch3 - ofst3 <= 127)
-    ch3 -= ofst3;
-
-  char str[5] = {ch0,ch1,ch2,ch3};
-
-  if (strcmp(str, "bad!") == 0) {
-    printf("Your string is bad!\n");
+  if (strcmp(str, "bad!") == 0) { // ofst == 17
+    printf("%s. Your string is bad!\n", str);
+    abort();
   } else {
-    printf("You string is not bad!\n");
+    printf("Your string is not bad!\n");
   }
 
   return 0;
