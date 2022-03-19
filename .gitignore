@@ -2,6 +2,7 @@ build/
 .vscode/
 dfg-files*/
 out-files/
+temp/
 
 pyscripts/taintTargets.txt
 
@@ -9,3 +10,6 @@ pyscripts/taintTargets.txt
 *.ll
 *.out
 *.dot
+
+*.out.*
+*.ll.*

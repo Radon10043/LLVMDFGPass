@@ -22,16 +22,19 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/JSON.h"
 
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/Value.h"
+
 using namespace llvm;
 
 
 /* 全局变量 */
+/* TODO: BBLineMap: <BBname, filename:line> */
 std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
 std::map<Value *, std::string> dbgLocMap;                                     // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
 
@@ -203,7 +206,7 @@ static bool isBlacklisted(const Function *F) {
  */
 static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
 
-  if (GlobalVariable* GV = dyn_cast<GlobalVariable>(op))
+  if (GlobalVariable *GV = dyn_cast<GlobalVariable>(op))
     varName = GV->getName().str();
 
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
@@ -228,7 +231,7 @@ static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
  */
 static void fsearchCall(Instruction::op_iterator op, std::string &varName, std::set<std::string> &vars) {
 
-  if (GlobalVariable* GV = dyn_cast<GlobalVariable>(op))
+  if (GlobalVariable *GV = dyn_cast<GlobalVariable>(op))
     varName = GV->getName().str();
 
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
@@ -377,6 +380,31 @@ bool RnDuPass::runOnModule(Module &M) {
       }
     }
   }
+
+  /* 将duVarMap转换为json并输出 */
+  std::error_code EC;
+  raw_fd_ostream duVarJson(outDirectory + "/duVar.json", EC, sys::fs::F_None);
+  json::OStream J(duVarJson);
+  J.objectBegin();
+  for (auto it = duVarMap.begin(); it != duVarMap.end(); it++) {  // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+    J.attributeBegin(it->first);
+    J.objectBegin();
+    for (auto iit = it->second.begin(); iit != it->second.end(); iit++) {
+      J.attributeBegin(iit->first);
+      J.arrayBegin();
+      for (auto var : iit->second) {
+        size_t found = var.find(".addr");
+        if (found != std::string::npos)
+          var = var.substr(0, found);
+        J.value(var);
+      }
+      J.arrayEnd();
+      J.attributeEnd();
+    }
+    J.objectEnd();
+    J.attributeEnd();
+  }
+  J.objectEnd();
 
   /* CFG */
   for (auto &F : M) {
