@@ -201,8 +201,8 @@ static bool isBlacklisted(const Function *F) {
 /**
  * @brief 向前搜索获得用到的变量名
  *
- * @param I
- * @param vec
+ * @param op
+ * @param varName
  */
 static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
 
@@ -212,6 +212,32 @@ static void fsearchVar(Instruction::op_iterator op, std::string &varName) {
   if (Instruction *Inst = dyn_cast<Instruction>(op)) {
 
     varName = Inst->getName().str();
+
+    if (Inst->getOpcode() == Instruction::PHI) // ?
+      return;
+
+    for (auto nop = Inst->op_begin(); nop != Inst->op_end(); nop++)
+      fsearchVar(nop, varName);
+  }
+}
+
+
+/**
+ * @brief 向前搜索获得用到的变量名和它的类型
+ *
+ * @param op
+ * @param varName
+ * @param varType
+ */
+static void fsearchVar(Instruction::op_iterator op, std::string &varName, Type *&varType) {
+
+  if (GlobalVariable *GV = dyn_cast<GlobalVariable>(op))
+    varName = GV->getName().str();
+
+  if (Instruction *Inst = dyn_cast<Instruction>(op)) {
+
+    varName = Inst->getName().str();
+    varType = Inst->getType();
 
     if (Inst->getOpcode() == Instruction::PHI) // ?
       return;
@@ -342,8 +368,15 @@ bool RnDuPass::runOnModule(Module &M) {
             }
 
             int n = varNames.size(); // 根据LLVM官网的描述, n的值应该为2, 因为Store指令有两个参数, 第一个参数是要存储的值(use), 第二个指令是要存储它的地址(def)
-            for (int i = 0; i < n - 1; i++)
+            for (int i = 0; i < n - 1; i++) {
+              if (varNames[i].empty())  // 若分析得到的变量名为空, 则不把空变量名存入map, 下同
+                continue;
               duVarMap[dbgLocMap[&I]]["use"].insert(varNames[i]);
+            }
+
+            if (varNames[n - 1].empty())
+              break;
+
             duVarMap[dbgLocMap[&I]]["def"].insert(varNames[n - 1]);
 
             break;
@@ -353,6 +386,10 @@ bool RnDuPass::runOnModule(Module &M) {
 
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearchVar(op, varName);
+
+            if (varName.empty())
+              break;
+
             duVarMap[dbgLocMap[&I]]["def"].insert(varName);
 
             break;
@@ -362,6 +399,10 @@ bool RnDuPass::runOnModule(Module &M) {
 
             for (auto op = I.op_begin(); op != I.op_end(); op++)
               fsearchVar(op, varName);
+
+            if (varName.empty())
+              break;
+
             duVarMap[dbgLocMap[&I]]["use"].insert(varName);
 
             break;
@@ -369,9 +410,19 @@ bool RnDuPass::runOnModule(Module &M) {
 
           case Instruction::Call: { // 调用函数时用到的变量也加入到def-use的map中
 
+            Type *varType = I.getType();
+
             for (auto op = I.op_begin(); op != I.op_end(); op++) {
-              fsearchVar(op, varName);
-              duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+              fsearchVar(op, varName, varType);
+
+              if (varName.empty())
+                continue;
+
+              if (varType->isPointerTy()) { // 如果是指针传递, 则认为是def
+                duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+              } else {
+                duVarMap[dbgLocMap[&I]]["use"].insert(varName);
+              }
             }
 
             break;
@@ -386,7 +437,7 @@ bool RnDuPass::runOnModule(Module &M) {
   raw_fd_ostream duVarJson(outDirectory + "/duVar.json", EC, sys::fs::F_None);
   json::OStream J(duVarJson);
   J.objectBegin();
-  for (auto it = duVarMap.begin(); it != duVarMap.end(); it++) {  // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+  for (auto it = duVarMap.begin(); it != duVarMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
     J.attributeBegin(it->first);
     J.objectBegin();
     for (auto iit = it->second.begin(); iit != it->second.end(); iit++) {
