@@ -3,7 +3,7 @@
  # @Author: Radon
  # @Date: 2022-01-22 15:24:14
  # @LastEditors: Radon
- # @LastEditTime: 2022-03-19 17:03:12
+ # @LastEditTime: 2022-03-25 12:47:37
  # @Description: Hi, say something
 ### 
 clang -O0 -emit-llvm -c test.c -o test.bc
@@ -21,3 +21,4 @@ clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/rado
 clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/3_ptrAndArr/ptr_arr.c -o examples/3_ptrAndArr/ptr_arr.ll
 
 clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/4_sample/sample.c -o examples/4_sample/sample.ll; cat radon1/out-files/duVar.json | jq --tab . > radon1/out-files/duVar2.json; mv radon1/out-files/duVar2.json radon1/out-files/duVar.json
+clang -S -g -emit-llvm -fno-discard-value-names -Xclang -load -Xclang build/radon1/libRnDuPass.so examples/5_address/address.c -o examples/5_address/address.ll
