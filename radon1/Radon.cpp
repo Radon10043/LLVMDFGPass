@@ -37,6 +37,7 @@ using namespace llvm;
 /* TODO: BBLineMap: <BBname, filename:line> */
 std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
 std::map<Value *, std::string> dbgLocMap;                                     // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::set<std::string>> bbLineMap;                       // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
 
 
 namespace llvm {
@@ -59,58 +60,6 @@ namespace llvm {
 
       Node->printAsOperand(OS, false);
       return OS.str();
-    }
-
-    std::string getNodeDescription(BasicBlock *Node, Function *Graph) {
-      std::set<std::string> varDescSet; // 存储当前基本块中变量的def/use信息
-      std::string nodeDesc;             // 该节点的描述内容, 实际上是varDescSet的所有内容合并, 用回车隔开
-      for (auto I = Node->begin(); I != Node->end(); I++) {
-
-        /* 获取当前指令对应的源文件位置 */
-        std::string dbgLoc = dbgLocMap[&*I];
-        if (dbgLoc == "undefined") // 跳过undefined节点
-          continue;
-
-        /* 收集当前指令def的变量信息 */
-        std::string desc = dbgLocMap[&*I] + "-def:";
-        for (auto &var : duVarMap[dbgLoc]["def"]) {
-
-          if (var.empty()) // 变量名为空的话就跳过
-            continue;
-
-          size_t found = var.find(".addr"); // 若变量名中有".addr"的话就去掉 (通常发生在参数传递的情况中)
-          if (found != std::string::npos)
-            desc += var.substr(0, found) + ",";
-          else
-            desc += var + ",";
-        }
-        if (*(desc.end() - 1) == ',')
-          desc.erase(desc.end() - 1);
-
-        /* 收集当前指令use的变量信息 */
-        desc += "-use:";
-        for (auto var : duVarMap[dbgLoc]["use"]) {
-          if (var.empty()) // 变量名为空的话就跳过
-            continue;
-
-          size_t found = var.find(".addr"); // 若变量名中有".addr"的话就去掉 (通常发生在参数传递的情况中)
-          if (found != std::string::npos)
-            desc += var.substr(0, found) + ",";
-          else
-            desc += var + ",";
-        }
-        if (*(desc.end() - 1) == ',')
-          desc.erase(desc.end() - 1);
-
-        varDescSet.insert(desc);
-      }
-
-      /* 合并节点中的变量信息描述 */
-      for (auto desc : varDescSet)
-        nodeDesc += desc + "\n";
-      nodeDesc.erase(nodeDesc.end() - 1);
-
-      return nodeDesc;
     }
   };
 } // namespace llvm
@@ -294,6 +243,9 @@ bool RnDuPass::runOnModule(Module &M) {
   /* Def-use */
   for (auto &F : M) {
     for (auto &BB : F) {
+
+      std::string bbname;
+
       for (auto &I : BB) {
         /* 跳过external libs */
         std::string filename;
@@ -307,6 +259,15 @@ bool RnDuPass::runOnModule(Module &M) {
         std::size_t found = filename.find_last_of("/\\");
         if (found != std::string::npos)
           filename = filename.substr(found + 1);
+
+        /* 设置基本块名字 */
+        if (!filename.empty() && line) {
+          if (bbname.empty()) // 若基本块名字为空时, 设置基本块名字, 并将其加入到map
+            bbname = filename + ":" + std::to_string(line);
+          if (!bbname.empty()) // 若基本块名字不为空, 将该行加入到map
+            bbLineMap[bbname].insert(filename + ":" + std::to_string(line));
+        }
+
 
         /* 获取函数调用信息 */
         if (auto *c = dyn_cast<CallInst>(&I)) {
@@ -369,7 +330,7 @@ bool RnDuPass::runOnModule(Module &M) {
 
             int n = varNames.size(); // 根据LLVM官网的描述, n的值应该为2, 因为Store指令有两个参数, 第一个参数是要存储的值(use), 第二个指令是要存储它的地址(def)
             for (int i = 0; i < n - 1; i++) {
-              if (varNames[i].empty())  // 若分析得到的变量名为空, 则不把空变量名存入map, 下同
+              if (varNames[i].empty()) // 若分析得到的变量名为空, 则不把空变量名存入map, 下同
                 continue;
               duVarMap[dbgLocMap[&I]]["use"].insert(varNames[i]);
             }
@@ -435,27 +396,41 @@ bool RnDuPass::runOnModule(Module &M) {
   /* 将duVarMap转换为json并输出 */
   std::error_code EC;
   raw_fd_ostream duVarJson(outDirectory + "/duVar.json", EC, sys::fs::F_None);
-  json::OStream J(duVarJson);
-  J.objectBegin();
+  json::OStream duVarJ(duVarJson);
+  duVarJ.objectBegin();
   for (auto it = duVarMap.begin(); it != duVarMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
-    J.attributeBegin(it->first);
-    J.objectBegin();
+    duVarJ.attributeBegin(it->first);
+    duVarJ.objectBegin();
     for (auto iit = it->second.begin(); iit != it->second.end(); iit++) {
-      J.attributeBegin(iit->first);
-      J.arrayBegin();
+      duVarJ.attributeBegin(iit->first);
+      duVarJ.arrayBegin();
       for (auto var : iit->second) {
         size_t found = var.find(".addr");
         if (found != std::string::npos)
           var = var.substr(0, found);
-        J.value(var);
+        duVarJ.value(var);
       }
-      J.arrayEnd();
-      J.attributeEnd();
+      duVarJ.arrayEnd();
+      duVarJ.attributeEnd();
     }
-    J.objectEnd();
-    J.attributeEnd();
+    duVarJ.objectEnd();
+    duVarJ.attributeEnd();
   }
-  J.objectEnd();
+  duVarJ.objectEnd();
+
+  /* 将bblineMap转为json并输出 */
+  raw_fd_ostream bbLineJson(outDirectory + "/bbLine.json", EC, sys::fs::F_None);
+  json::OStream bbLineJ(bbLineJson);
+  bbLineJ.objectBegin();
+  for (auto it = bbLineMap.begin(); it != bbLineMap.end(); it++) {
+    bbLineJ.attributeBegin(it->first);
+    bbLineJ.arrayBegin();
+    for (auto line : it->second)
+      bbLineJ.value(line);
+    bbLineJ.arrayEnd();
+    bbLineJ.attributeEnd();
+  }
+  bbLineJ.objectEnd();
 
   /* CFG */
   for (auto &F : M) {
