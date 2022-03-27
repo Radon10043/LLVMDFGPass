@@ -1,162 +1,156 @@
+'''
+Author: Radon
+Date: 2022-02-05 16:20:42
+LastEditors: Radon
+LastEditTime: 2022-03-27 17:40:44
+Description: Hi, say something
+'''
 import pydot
 import argparse
 import os
 import sys
-import queue
+import json
+import heapq
+import functools
 
 import networkx as nx
 
+from queue import Queue, PriorityQueue
 
-def getInfo(dotPath: str, taintPath: str):
-    """获取所有dot文件路径, 调用函数信息和污点源
+from torch import greater
+
+
+class MyNode:
+
+    def __init__(self, distance, nodeName, nodeLabel):
+        self.distance = distance
+        self.nodeName = nodeName
+        self.nodeLabel = nodeLabel
+
+    def __lt__(self, other):
+        return self.distance < other.distance
+
+
+def myCmp(x, y):
+    """自定义排序, 行号大的排在前面
 
     Parameters
     ----------
-    dotPath : str
-        dot文件夹的路径
-    taintPath : str
-        污点源txt文件的路径
+    x : str
+        filename:line
+    y : str
+        filename:line
 
     Returns
     -------
-    [type]
-        [description]
+    int
+        返回值必须是-1, 0, 1, 不能是True/False
 
     Notes
     -----
-    [description]
+    _description_
     """
-    if not os.path.exists(dotPath):
-        print("文件夹" + dotPath + "不存在.", file=sys.stderr)
-        return
-    if not os.path.isdir(dotPath):
-        print(dotPath + "不是文件夹, 分析停止.", file=sys.stderr)
-        return
+    x = int(x.split(":")[1])
+    y = int(y.split(":")[1])
 
-    if not os.path.exists(taintPath):
-        print("文件" + taintPath + "不存在.", file=sys.stderr)
-        return
-    if not os.path.splitext(taintPath)[1] == ".txt":
-        print(taintPath + "不是txt文件.", file=sys.stderr)
-        return
+    if x > y:
+        return -1
+    elif x < y:
+        return 1
+    return 0
 
-    # 获取所有dot图的路径
-    dotfileList = list()  # 所有dot图的路径
-    for file in os.listdir(dotPath):
-        if os.path.splitext(file)[1] != ".dot":  # 跳过非dot文件
-            continue
-        dotfileList.append(os.path.join(dotPath, file))
 
-    # 获取调用信息
-    callDict = dict()  # <文件名与行号, <被调用的函数名, <参数, 变量>>>
-    lines = open(os.path.join(dotPath, "linecalls.txt")).readlines()
-    for line in lines:
-        line = line.rstrip("\n")
-        loc, calledF, pvs = line.split("-")  # 文件名与行号, 被调用的函数, 参数与变量列表
+def getNodeName(nodes, nodeLabel) -> str:
+    """遍历nodes, 获取nodeLabel的name, 形如Node0x56372e651a90
 
-        if not loc in callDict.keys():
-            callDict[loc] = dict()
-        if not calledF in callDict[loc].keys():
-            callDict[loc][calledF] = dict()
+    Parameters
+    ----------
+    nodes : _type_
+        _description_
+    nodeLabel : _type_
+        _description_
 
-        pvs = pvs.split(",")  # 将parameter与variable写入字典
-        for pv in pvs:
-            try:
-                p, v = pv.split(":")
+    Returns
+    -------
+    str
+        _description_
 
-                if not p in callDict[loc][calledF].keys():
-                    callDict[loc][calledF][p] = v.split("|")
-                else:
-                    callDict[loc][calledF][p].append(v)
+    Notes
+    -----
+    _description_
+    """
+    for node in nodes:
+        if node.get("label") == "\"{" + nodeLabel + ":}\"":
+            return node.obj_dict["name"]
+    return ""
 
-            except:
+
+def fitnessCalculation(path: str, tSrcsFile: str):
+    """计算各基本块的适应度
+
+    Parameters
+    ----------
+    path : str
+        _description_
+    tSrcsFile : str
+        _description_
+
+    Notes
+    -----
+    _description_
+    """
+    tQueue = Queue()
+    visited = set()
+    duVarDict = dict()
+    bbLineDict = dict()  # <bb名, 它所包含的所有行>
+    fitDict = dict()  # <bb名, 适应度数组>
+    resDict = dict()  # <bb名, 适应度>
+
+    with open(tSrcsFile) as f:  # 读取污点源, 并加入队列
+        for line in f.readlines():
+            tQueue.put(line.rstrip("\n"))
+
+    with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
+        duVarDict = json.load(f)
+
+    with open(path + "/bbLine.json") as f:  # 读取基本块和它所有报行的行的json文件
+        bbLineDict = json.load(f)
+    for k, v in bbLineDict.items():  # 对基本块所拥有的行进行排序, 从大到小, 方便后续操作
+        v.sort(key=functools.cmp_to_key(myCmp))
+
+    # TODO: 下面的内容都不完整, 需要完善
+
+    func = "main"
+    cfg = "cfg.main.dot"
+    pq = PriorityQueue()
+
+    cfgdot = pydot.graph_from_dot_file(path + "/" + cfg)[0]
+    cfgnx = nx.drawing.nx_pydot.from_pydot(cfgdot)
+    nodes = cfgdot.get_nodes()
+
+    nodeLabel = tQueue.get()
+    target = getNodeName(nodes, nodeLabel.split(",")[0])
+    # TODO: 若target为空, 则跳过
+
+    for node in nodes:
+        nodeLabel = node.get("label")
+        nodeName = node.obj_dict["name"]
+        try:
+            distance = nx.shortest_path_length(cfgnx, nodeName, target)
+            if distance == 0:
                 continue
+            pq.put(MyNode(distance, nodeName, nodeLabel))
+        except nx.NetworkXNoPath:
+            print(nodeLabel + " cant reach target")
 
-    # 获取污点源队列
-    taintList = open(taintPath).readlines()
-    taintQueue = queue.Queue()
-    for taint in taintList:
-        taintQueue.put(taint.rstrip("\n"))
-
-    return dotfileList, callDict, taintQueue
-
-
-def getGraphDict(dotfileList: list) -> dict:
-    """获得存储cfg信息的字典
-
-    Parameters
-    ----------
-    dotfileList : list
-        存储所有dot文件路径的列表
-
-    Returns
-    -------
-    dict
-        存储cfg信息的字典, 结构: <函数名, <"dot"或"nx", dot图或nx图>>
-
-    Notes
-    -----
-    [description]
-    """
-    graphDict = dict()  # <函数名, <"dot"或"nx", dot图或nx图>>
-    bbDict = dict()  # <bbname, <def或use, {varname}>>
-    # <bbid, bbname>?
-
-    for dotfile in dotfileList:
-
-        funcName = dotfile.split("/")[-1].split(".")[1]
-        graphDict[funcName] = dict()
-
-        cfgDot = pydot.graph_from_dot_file(dotfile)
-        cfgDot = cfgDot[0]
-
-        cfgNx = nx.drawing.nx_pydot.from_pydot(cfgDot)
-
-        graphDict[funcName]["dot"] = cfgDot
-        graphDict[funcName]["nx"] = cfgNx
-
-        nodes = cfgDot.get_nodes()
-        for node in nodes:
-            nodeLabel = node.obj_dict["attributes"]["label"]
-            bbid = node.obj_dict["name"]
-
-            nodeLabel = nodeLabel.lstrip("\"{").rstrip("}\"")
-            nodeLabel = nodeLabel.replace("\\n", "\n")
-
-            bbname, bbdesc = nodeLabel.split("|")
-            bbname = bbname.rstrip(":")
-            bbdesc = bbdesc.split("\n")
-
-            bbDict[bbname] = dict()
-            for desc in bbdesc:
-                line, defVars, useVars = desc.split("-")
-
-                defVars = defVars.lstrip("def:").split(",")
-                defVars = set(defVars)
-
-                useVars = useVars.lstrip("use:").split(",")
-                useVars = set(useVars)
-
-                if not bbDict[bbname]:
-                    bbDict[bbname]["def"] = set()
-                    bbDict[bbname]["use"] = set()
-                bbDict[bbname]["def"] |= defVars    # 集合合并
-                bbDict[bbname]["use"] |= useVars
-
-            bbDict[bbname]["id"] = bbid
-
-    return graphDict
-
-
-# TODO: 向前向后搜索, 根据变量的定义使用关系标记BB
-def analyze(graphDict: dict, callDict: dict, taintQueue: queue.Queue):
-    pass
+    while not pq.empty():
+        temp = pq.get()
+        print(temp.distance)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dots", help="存储dot图的文件夹", required=True)
+    parser.add_argument("-p", "--path", help="存储dot, json, txt等文件的目录", required=True)
     parser.add_argument("-t", "--taint", help="存储污点源信息的txt文件", required=True)
     args = parser.parse_args()
-    dotfileList, callDict, taintQueue = getInfo(args.dots, args.taint)
-    graphDict = getGraphDict(dotfileList)
+    fitnessCalculation(args.path, args.taint)
