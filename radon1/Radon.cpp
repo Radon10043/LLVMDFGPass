@@ -241,6 +241,10 @@ bool RnDuPass::runOnModule(Module &M) {
 
   /* Def-use */
   for (auto &F : M) {
+
+    if (isBlacklisted(&F))
+      continue;
+
     for (auto &BB : F) {
 
       std::string bbname;
