@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-03-30 17:12:35
+LastEditTime: 2022-03-30 17:19:25
 Description: Hi, say something
 '''
 import pydot
@@ -16,8 +16,6 @@ import functools
 import networkx as nx
 
 from queue import Queue, PriorityQueue
-
-from torch import greater
 
 
 class MyNode:
