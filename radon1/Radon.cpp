@@ -314,10 +314,11 @@ bool RnDuPass::runOnModule(Module &M) {
         }
 
         /* 将指令和对应的源文件中的位置存入map */
+        std::string loc;
         if (filename.empty() || !line)
-          dbgLocMap[&I] = "undefined";
-        else
-          dbgLocMap[&I] = filename + ":" + std::to_string(line);
+          continue;
+        loc = filename + ":" + std::to_string(line);
+        dbgLocMap[&I] = loc;
 
         /* 分析变量的定义-使用关系 */
         std::string varName;
