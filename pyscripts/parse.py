@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-03-30 17:19:25
+LastEditTime: 2022-03-31 15:26:19
 Description: Hi, say something
 '''
 import pydot
@@ -132,7 +132,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
     # TODO: 下面的内容都不完整, 需要完善
 
     for tSrc in tSrcs:
-        tFunc = "main"  # tSrc所在函数, 用于后续计算CG距离
+        cgDist = 0  # 函数调用之间的距离
         tQueue.put(tSrc)
         visited = set()  # 防止重复计算
 
@@ -144,8 +144,6 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             func = "main"
             cfg = "cfg.main.dot"
             pq = PriorityQueue()
-
-            # cgDist
 
             cfgdot = pydot.graph_from_dot_file(path + "/" + cfg)[0]
             cfgnx = nx.drawing.nx_pydot.from_pydot(cfgdot)
@@ -160,7 +158,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 nodeLabel = node.get("label").lstrip("\"{").rstrip(":}\"")
                 nodeName = node.obj_dict["name"]
                 try:
-                    distance = nx.shortest_path_length(cfgnx, nodeName, targetName)
+                    distance = nx.shortest_path_length(cfgnx, nodeName, targetName)  # + cgDist
                     if distance == 0:
                         continue
                     pq.put(MyNode(distance, nodeName, nodeLabel))
@@ -193,7 +191,8 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                     fitness = 1 / (1 + distance)
                     fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
 
-            # tQueue.get()
+            # cgDist += shortest(targetName, entryName)
+            # tQueue已经pop
             # callers = bbs which called func (set)
             # tQueue.put(callers)
 
