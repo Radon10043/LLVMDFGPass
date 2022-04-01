@@ -34,9 +34,11 @@ using namespace llvm;
 
 
 /* 全局变量 */
-std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap; // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
-std::map<Value *, std::string> dbgLocMap;                                     // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
-std::map<std::string, std::set<std::string>> bbLineMap;                       // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
+std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;   // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
+std::map<Value *, std::string> dbgLocMap;                                       // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::set<std::string>> bbLineMap;                         // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
+std::map<std::string, std::string> funcEntryMap;                                // <函数名, 其cfg中入口BB的名字>
+std::map<std::string, std::string> bbFuncMap;                                   // <bb名, 其所在函数名>
 
 
 namespace llvm {
@@ -265,8 +267,10 @@ bool RnDuPass::runOnModule(Module &M) {
 
         /* 设置基本块名字 */
         if (!filename.empty() && line) {
-          if (bbname.empty()) // 若基本块名字为空时, 设置基本块名字, 并将其加入到map
+          if (bbname.empty()) { // 若基本块名字为空时, 设置基本块名字, 并将其加入到bbFuncMap
             bbname = filename + ":" + std::to_string(line);
+            bbFuncMap[bbname] = F.getName().str();
+          }
           if (!bbname.empty()) // 若基本块名字不为空, 将该行加入到map
             bbLineMap[bbname].insert(filename + ":" + std::to_string(line));
         }
@@ -383,8 +387,9 @@ bool RnDuPass::runOnModule(Module &M) {
               if (varName.empty())
                 continue;
 
-              if (varType->isPointerTy()) { // 如果是指针传递, 则认为是def
+              if (varType->isPointerTy()) { // 如果是指针传递, 则认为 def,use 都有
                 duVarMap[dbgLocMap[&I]]["def"].insert(varName);
+                duVarMap[dbgLocMap[&I]]["use"].insert(varName);
               } else {
                 duVarMap[dbgLocMap[&I]]["use"].insert(varName);
               }
@@ -436,6 +441,17 @@ bool RnDuPass::runOnModule(Module &M) {
   }
   bbLineJ.objectEnd();
 
+  /* 将bbFuncMap转换为json并输出 */
+  raw_fd_ostream bbFuncJson(outDirectory + "/bbFunc.json", EC, sys::fs::F_None);
+  json::OStream bbFuncJ(bbFuncJson);
+  bbFuncJ.objectBegin();
+  for (auto it = bbFuncMap.begin(); it != bbFuncMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+    bbFuncJ.attributeBegin(it->first);
+    bbFuncJ.value(it->second);
+    bbFuncJ.attributeEnd();
+  }
+  bbFuncJ.objectEnd();
+
   /* CFG */
   for (auto &F : M) {
 
@@ -481,6 +497,10 @@ bool RnDuPass::runOnModule(Module &M) {
     }
 
     if (hasBB) {
+
+      /* Get entry BB */
+      funcEntryMap[F.getName().str()] = F.getEntryBlock().getName().str();
+
       /* Print CFG */
       std::error_code EC;
       std::string cfgFileName = outDirectory + "/cfg." + F.getName().str() + ".dot";
@@ -491,6 +511,18 @@ bool RnDuPass::runOnModule(Module &M) {
       }
     }
   }
+
+  /* 将funcEntryMap转换为json并输出 */
+  raw_fd_ostream funcEntryJson(outDirectory + "/funcEntry.json", EC, sys::fs::F_None);
+  json::OStream funcEntryJ(funcEntryJson);
+  funcEntryJ.objectBegin();
+  for (auto it = funcEntryMap.begin(); it != funcEntryMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+    funcEntryJ.attributeBegin(it->first);
+    funcEntryJ.value(it->second);
+    funcEntryJ.attributeEnd();
+  }
+  funcEntryJ.objectEnd();
+
   return false;
 }
 

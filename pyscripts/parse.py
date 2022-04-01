@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-03-31 15:26:19
+LastEditTime: 2022-04-01 11:44:14
 Description: Hi, say something
 '''
 import pydot
@@ -16,6 +16,13 @@ import functools
 import networkx as nx
 
 from queue import Queue, PriorityQueue
+
+
+# Global
+DU_VAR_DICT = dict()    # <行, <def/use, 变量(set)>>
+BB_LINE_DICT = dict()  # <bb名, 它所包含的所有行>
+BB_FUNC_DICT = dict()  # <bb名, 它所在的函数>
+FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
 
 
 class MyNode:
@@ -97,22 +104,24 @@ def fitnessCalculation(path: str, tSrcsFile: str):
     -----
     _description_
     """
-    tSrcs = list()
+    tSrcs = dict()
     tQueue = Queue()
-    duVarDict = dict()
-    bbLineDict = dict()  # <bb名, 它所包含的所有行>
     fitDict = dict()  # <bb名, 适应度数组>
     resDict = dict()  # <bb名, 适应度>
     index = 0  # 下标
 
-    with open(tSrcsFile) as f:  # 读取污点源, 并加入队列
-        for line in f.readlines():
-            tSrcs.append(line.rstrip("\n"))
+    with open(tSrcsFile) as f:  # 读取污点源,
+        tSrcs = json.load(f)
+        for k, v in tSrcs.items():
+            if "def" in v.keys():
+                v["def"] = set(v["def"])
+            if "use" in v.keys():
+                v["use"] = set(v["use"])
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
-        duVarDict = json.load(f)
+        DU_VAR_DICT = json.load(f)
 
-        for k, v in duVarDict.items():
+        for k, v in DU_VAR_DICT.items():
 
             if "def" in v.keys():
                 v["def"] = set(v["def"])
@@ -125,31 +134,43 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 v["use"] = set()
 
     with open(path + "/bbLine.json") as f:  # 读取基本块和它所有报行的行的json文件
-        bbLineDict = json.load(f)
-    for k, v in bbLineDict.items():  # 对基本块所拥有的行进行排序, 从大到小, 方便后续操作
+        BB_LINE_DICT = json.load(f)
+    for k, v in BB_LINE_DICT.items():  # 对基本块所拥有的行进行排序, 从大到小, 方便后续操作
         v.sort(key=functools.cmp_to_key(myCmp))
+
+    with open(path + "/bbFunc.json") as f:  # 该json是为了能更快地确认bb所在函数
+        BB_FUNC_DICT = json.load(f)
+
+    with open(path + "/funcEntry.json") as f:  # 该json是为了更方便地计算跨函数间的基本块距离
+        FUNC_ENTRY_DICT = json.load(f)
 
     # TODO: 下面的内容都不完整, 需要完善
 
-    for tSrc in tSrcs:
+    for tk, tv in tSrcs.items():
         cgDist = 0  # 函数调用之间的距离
-        tQueue.put(tSrc)
+        tQueue.put(tk)
         visited = set()  # 防止重复计算
+
+        preSet, postSet = set(), set()
+        if "use" in tv.keys():
+            preSet = tv["use"]
+        if "def" in tv.keys():
+            postSet = tv["def"]
 
         while not tQueue.empty():
             targetLabel = tQueue.get()
             if targetLabel in visited:
                 continue
 
-            func = "main"
-            cfg = "cfg.main.dot"
+            func = BB_FUNC_DICT[targetLabel]
+            cfg = "cfg." + func + ".dot"
             pq = PriorityQueue()
 
             cfgdot = pydot.graph_from_dot_file(path + "/" + cfg)[0]
             cfgnx = nx.drawing.nx_pydot.from_pydot(cfgdot)
             nodes = cfgdot.get_nodes()
 
-            targetName = getNodeName(nodes, targetLabel)  # TODO: target不一定是基本块名称
+            targetName = getNodeName(nodes, targetLabel)
 
             # TODO: 若target为空, 则跳过
             # TODO: 目前只有前向分析
@@ -165,8 +186,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 except nx.NetworkXNoPath:
                     print(nodeLabel + " cant reach target")
 
-            preSet = set()
-            for var in duVarDict[targetLabel]["use"]:
+            for var in DU_VAR_DICT[targetLabel]["use"]:
                 preSet.add(var)
 
             while not pq.empty():
@@ -175,13 +195,11 @@ def fitnessCalculation(path: str, tSrcsFile: str):
 
                 # 检查该bb是否被污染, 并实时更新preSet
                 isTainted = False
-                for bbline in bbLineDict[bbname]:
+                for bbline in BB_LINE_DICT[bbname]:
                     try:
-                        if duVarDict[bbline]["use"] & preSet:
+                        if DU_VAR_DICT[bbline]["def"] & preSet:
                             isTainted = True
-                        if duVarDict[bbline]["def"] & preSet:
-                            isTainted = True
-                            preSet = preSet - duVarDict[bbline]["def"] | duVarDict[bbline]["use"]
+                            preSet = preSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
                     except KeyError:
                         continue  # 该行没有定义-使用关系, 跳过
 
