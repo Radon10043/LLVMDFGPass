@@ -40,6 +40,7 @@ std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::
 std::map<std::string, std::set<std::string>> bbLineMap;                                                  // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
 std::map<std::string, std::string> funcEntryMap;                                                         // <函数名, 其cfg中入口BB的名字>
 std::map<std::string, std::string> bbFuncMap;                                                            // <bb名, 其所在函数名>
+std::map<std::string, std::string> linebbMap;                                                            // <行, 其所在bb>
 
 
 namespace llvm {
@@ -263,15 +264,25 @@ bool RnDuPass::runOnModule(Module &M) {
         if (found != std::string::npos)
           filename = filename.substr(found + 1);
 
+        /* 获取当前位置 */
+        std::string loc = filename + ":" + std::to_string(line);
+
         /* 设置基本块名字 */
         if (!filename.empty() && line) {
+
           if (bbname.empty()) { // 若基本块名字为空时, 设置基本块名字, 并将其加入到bbFuncMap
             bbname = filename + ":" + std::to_string(line);
             bbFuncMap[bbname] = F.getName().str();
           }
-          if (!bbname.empty()) // 若基本块名字不为空, 将该行加入到map
-            bbLineMap[bbname].insert(filename + ":" + std::to_string(line));
+
+          if (!bbname.empty()) { // 若基本块名字不为空, 将该行加入到map
+            bbLineMap[bbname].insert(loc);
+            linebbMap[loc] = bbname;
         }
+
+          dbgLocMap[&I] = loc;
+        } else
+          continue;
 
 
         /* 获取函数调用信息 */
@@ -290,7 +301,6 @@ bool RnDuPass::runOnModule(Module &M) {
 
               /* 将函数和其参数对应的信息写入map */
               int i = 0, n = varVec.size();
-              std::string loc = filename + ":" + std::to_string(line);
               for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
 
                 std::string argName = arg->getName().str();
@@ -305,12 +315,6 @@ bool RnDuPass::runOnModule(Module &M) {
           }
         }
 
-        /* 将指令和对应的源文件中的位置存入map */
-        std::string loc;
-        if (filename.empty() || !line)
-          continue;
-        loc = filename + ":" + std::to_string(line);
-        dbgLocMap[&I] = loc;
 
         /* 分析变量的定义-使用关系 */
         std::string varName;
@@ -415,7 +419,7 @@ bool RnDuPass::runOnModule(Module &M) {
   }
   duVarJ.objectEnd();
 
-  /* 将bblineMap转为json并输出 */
+  /* 将bbLineMap转为json并输出 */
   raw_fd_ostream bbLineJson(outDirectory + "/bbLine.json", EC, sys::fs::F_None);
   json::OStream bbLineJ(bbLineJson);
   bbLineJ.objectBegin();
@@ -428,6 +432,17 @@ bool RnDuPass::runOnModule(Module &M) {
     bbLineJ.attributeEnd();
   }
   bbLineJ.objectEnd();
+
+  /* 将linebbMap转为json并输出 */
+  raw_fd_ostream linebbJson(outDirectory + "/linebb.json", EC, sys::fs::F_None);
+  json::OStream linebbJ(linebbJson);
+  linebbJ.objectBegin();
+  for (auto pss : linebbMap) {
+    linebbJ.attributeBegin(pss.first);
+    linebbJ.value(pss.second);
+    linebbJ.attributeEnd();
+  }
+  linebbJ.objectEnd();
 
   /* 将lineCallsMap转换为json并输出 */
   raw_fd_ostream lineCallsJson(outDirectory + "/lineCalls.json", EC, sys::fs::F_None);
