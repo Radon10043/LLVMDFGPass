@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-01 11:44:14
+LastEditTime: 2022-04-01 12:26:07
 Description: Hi, say something
 '''
 import pydot
@@ -65,6 +65,18 @@ def myCmp(x, y):
     return 0
 
 
+def isTainted(bbname: str, preSet: set) -> bool:
+    isTainted = False
+    for bbline in BB_LINE_DICT[bbname]:
+        try:
+            if DU_VAR_DICT[bbline]["def"] & preSet:
+                isTainted = True
+                preSet = preSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
+        except KeyError:
+            continue  # 该行没有定义-使用关系, 跳过
+    return isTainted
+
+
 def getNodeName(nodes, nodeLabel) -> str:
     """遍历nodes, 获取nodeLabel的name, 形如Node0x56372e651a90
 
@@ -117,6 +129,8 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 v["def"] = set(v["def"])
             if "use" in v.keys():
                 v["use"] = set(v["use"])
+
+    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
         DU_VAR_DICT = json.load(f)
@@ -193,17 +207,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 node = pq.get()
                 distance, bbname = node.distance, node.label
 
-                # 检查该bb是否被污染, 并实时更新preSet
-                isTainted = False
-                for bbline in BB_LINE_DICT[bbname]:
-                    try:
-                        if DU_VAR_DICT[bbline]["def"] & preSet:
-                            isTainted = True
-                            preSet = preSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
-                    except KeyError:
-                        continue  # 该行没有定义-使用关系, 跳过
-
-                if isTainted:
+                if isTainted(bbname, preSet):
                     if not bbname in fitDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
                         fitDict[bbname] = [0] * len(tSrcs)
                     fitness = 1 / (1 + distance)
