@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-01 17:34:35
+LastEditTime: 2022-04-02 14:29:21
 Description: Hi, say something
 '''
 from ast import arguments
@@ -67,7 +67,7 @@ def myCmp(x, y):
     return 0
 
 
-def isPreTainted(bbname: str, preSet: set):
+def isPreTainted(bbname: str, preSet: set, defSet: set, useSet: set):
     """查看该基本块是否被前向污染了
 
     Parameters
@@ -76,6 +76,10 @@ def isPreTainted(bbname: str, preSet: set):
         基本块名称
     preSet : set
         前向污点分析时的变量集合
+    defSet : set
+        存储了各行定义的变量的集合
+    useSet : set
+        存储了各行使用的变量的集合
 
     Returns
     -------
@@ -93,10 +97,11 @@ def isPreTainted(bbname: str, preSet: set):
         try:
             if DU_VAR_DICT[bbline]["def"] & preSet:
                 isTainted = True
-                preSet = preSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
+                defSet |= DU_VAR_DICT[bbline]["def"]
+                useSet |= DU_VAR_DICT[bbline]["use"]
         except KeyError:
             continue  # 该行没有定义-使用关系, 跳过
-    return isTainted, preSet
+    return isTainted, defSet, useSet
 
 
 def getbbPreTainted(loc: str, preSet: set):
@@ -120,7 +125,7 @@ def getbbPreTainted(loc: str, preSet: set):
     -----
     _description_
     """
-    preSet |= DU_VAR_DICT[loc]["use"]   # 取并集
+    preSet |= DU_VAR_DICT[loc]["use"]  # 取并集
 
     filename, line = loc.split(":")
     line = int(line)
@@ -243,7 +248,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
         if "def" in tv.keys():
             postSet = tv["def"]
 
-        tQueue = Queue()    # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
+        tQueue = Queue()  # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
         tQueue.put((tk, cgDist, preSet))
 
         while not tQueue.empty():
@@ -284,15 +289,25 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 except nx.NetworkXNoPath:
                     pass
 
+            nowDist = cgDist  # nowDist用于判断当前节点与上一节点是否是同一宽度
+            defSet, useSet = set(), set()
             while not pq.empty():
                 node = pq.get()
                 distance, bbname = node.distance, node.label
+
+                # 同一宽度时, 统计def-use情况, 并存入集合
+                # 不同宽度时, 与defSet做差集, 与useSet做并集
+                if distance != nowDist:
+                    nowDist = distance
+                    preSet = preSet - defSet | useSet
+                    defSet.clear()
+                    useSet.clear()
 
                 # 如果距离与cg间的距离相等, 证明该基本块就是污点源基本块或调用里能到达污点源函数的基本块, 一定是被污染的
                 if distance == cgDist:
                     isTainted = True
                 else:
-                    isTainted, preSet = isPreTainted(bbname, preSet)
+                    isTainted, defSet, useSet = isPreTainted(bbname, preSet, defSet, useSet)
 
                 # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
@@ -315,9 +330,12 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                     try:
                         nPreSet.remove(param)
                         nPreSet |= arguments
-                    except KeyError:    # 若param没有受到污染, 跳过
+                    except KeyError:  # 若param没有受到污染, 跳过
                         pass
                 tQueue.put((caller, cgDist, nPreSet))
+
+            # 将该污点源加入集合, 防止重复计算
+            visited.add(targetLabel)
 
         index += 1
 
