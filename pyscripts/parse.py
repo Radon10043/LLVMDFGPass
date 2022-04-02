@@ -2,9 +2,10 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-01 12:26:07
+LastEditTime: 2022-04-01 17:34:35
 Description: Hi, say something
 '''
+from ast import arguments
 import pydot
 import argparse
 import os
@@ -17,12 +18,13 @@ import networkx as nx
 
 from queue import Queue, PriorityQueue
 
-
 # Global
-DU_VAR_DICT = dict()    # <行, <def/use, 变量(set)>>
+DU_VAR_DICT = dict()  # <行, <def/use, {变量}>>
 BB_LINE_DICT = dict()  # <bb名, 它所包含的所有行>
 BB_FUNC_DICT = dict()  # <bb名, 它所在的函数>
 FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
+LINE_CALLS_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
+LINE_BB_DICT = dict()  # <行, 其所在基本块>
 
 
 class MyNode:
@@ -65,7 +67,27 @@ def myCmp(x, y):
     return 0
 
 
-def isTainted(bbname: str, preSet: set) -> bool:
+def isPreTainted(bbname: str, preSet: set):
+    """查看该基本块是否被前向污染了
+
+    Parameters
+    ----------
+    bbname : str
+        基本块名称
+    preSet : set
+        前向污点分析时的变量集合
+
+    Returns
+    -------
+    bool
+        该基本块是否被前向污染
+    set
+        实时更新的前向污染变量集合
+
+    Notes
+    -----
+    _description_
+    """
     isTainted = False
     for bbline in BB_LINE_DICT[bbname]:
         try:
@@ -74,7 +96,47 @@ def isTainted(bbname: str, preSet: set) -> bool:
                 preSet = preSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
         except KeyError:
             continue  # 该行没有定义-使用关系, 跳过
-    return isTainted
+    return isTainted, preSet
+
+
+def getbbPreTainted(loc: str, preSet: set):
+    """根据行数获取基本块, 并更新变量污染信息
+
+    Parameters
+    ----------
+    loc : str
+        行数, filename:line
+    preSet : set
+        前向污染变量集合
+
+    Returns
+    -------
+    str
+        该行所属的基本块名称
+    preSet
+        实时更新的污染变量集合
+
+    Notes
+    -----
+    _description_
+    """
+    preSet |= DU_VAR_DICT[loc]["use"]   # 取并集
+
+    filename, line = loc.split(":")
+    line = int(line)
+
+    while not loc in LINE_BB_DICT.keys() or loc != LINE_BB_DICT[loc]:
+        # 倒序查看并更新污染变量集合
+        line -= 1
+        loc = filename + ":" + str(line)
+
+        try:
+            if DU_VAR_DICT[loc]["def"] & preSet:
+                preSet = preSet - DU_VAR_DICT[loc]["def"] | DU_VAR_DICT[loc]["use"]
+        except KeyError:
+            continue  # 该行没有定义-使用关系, 跳过
+
+    return loc, preSet
 
 
 def getNodeName(nodes, nodeLabel) -> str:
@@ -117,7 +179,6 @@ def fitnessCalculation(path: str, tSrcsFile: str):
     _description_
     """
     tSrcs = dict()
-    tQueue = Queue()
     fitDict = dict()  # <bb名, 适应度数组>
     resDict = dict()  # <bb名, 适应度>
     index = 0  # 下标
@@ -130,7 +191,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             if "use" in v.keys():
                 v["use"] = set(v["use"])
 
-    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT
+    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, LINE_CALLS_DICT, LINE_BB_DICT
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
         DU_VAR_DICT = json.load(f)
@@ -157,12 +218,23 @@ def fitnessCalculation(path: str, tSrcsFile: str):
 
     with open(path + "/funcEntry.json") as f:  # 该json是为了更方便地计算跨函数间的基本块距离
         FUNC_ENTRY_DICT = json.load(f)
+        for k, v in FUNC_ENTRY_DICT.items():
+            FUNC_ENTRY_DICT[k] = v.rstrip(":")
+
+    with open(path + "/lineCalls.json") as f:  # 该json存储里每一行的调用信息
+        LINE_CALLS_DICT = json.load(f)
+        for k1, v1 in LINE_CALLS_DICT.items():
+            for k2, v2 in v1.items():
+                for k3, v3 in v2.items():
+                    LINE_CALLS_DICT[k1][k2][k3] = set(v3)
+
+    with open(path + "/linebb.json") as f:  # 该json存储了每一行对应的基本块
+        LINE_BB_DICT = json.load(f)
 
     # TODO: 下面的内容都不完整, 需要完善
 
     for tk, tv in tSrcs.items():
         cgDist = 0  # 函数调用之间的距离
-        tQueue.put(tk)
         visited = set()  # 防止重复计算
 
         preSet, postSet = set(), set()
@@ -171,10 +243,15 @@ def fitnessCalculation(path: str, tSrcsFile: str):
         if "def" in tv.keys():
             postSet = tv["def"]
 
+        tQueue = Queue()    # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
+        tQueue.put((tk, cgDist, preSet))
+
         while not tQueue.empty():
-            targetLabel = tQueue.get()
+            targetLabel, cgDist, preSet = tQueue.get()
             if targetLabel in visited:
                 continue
+
+            targetLabel, preSet = getbbPreTainted(targetLabel, preSet)
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
@@ -186,6 +263,9 @@ def fitnessCalculation(path: str, tSrcsFile: str):
 
             targetName = getNodeName(nodes, targetLabel)
 
+            entryLabel = FUNC_ENTRY_DICT[func]
+            entryName = getNodeName(nodes, entryLabel)
+
             # TODO: 若target为空, 则跳过
             # TODO: 目前只有前向分析
 
@@ -193,30 +273,48 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 nodeLabel = node.get("label").lstrip("\"{").rstrip(":}\"")
                 nodeName = node.obj_dict["name"]
                 try:
-                    distance = nx.shortest_path_length(cfgnx, nodeName, targetName)  # + cgDist
-                    if distance == 0:
-                        continue
+                    if nodeName == targetName:
+                        distance = cgDist
+                    else:
+                        distance = cgDist + nx.shortest_path_length(cfgnx, nodeName, targetName)
                     pq.put(MyNode(distance, nodeName, nodeLabel))
                 except nx.NetworkXNoPath:
-                    print(nodeLabel + " cant reach target")
-
-            for var in DU_VAR_DICT[targetLabel]["use"]:
-                preSet.add(var)
+                    pass
 
             while not pq.empty():
                 node = pq.get()
                 distance, bbname = node.distance, node.label
 
-                if isTainted(bbname, preSet):
+                # 如果距离与cg间的距离相等, 证明该基本块就是污点源基本块或调用里能到达污点源函数的基本块, 一定是被污染的
+                if distance == cgDist:
+                    isTainted = True
+                else:
+                    isTainted, preSet = isPreTainted(bbname, preSet)
+
+                # 若被污染了, 计算适应度, 加入dict
+                if isTainted:
                     if not bbname in fitDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
                         fitDict[bbname] = [0] * len(tSrcs)
                     fitness = 1 / (1 + distance)
                     fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
 
-            # cgDist += shortest(targetName, entryName)
-            # tQueue已经pop
-            # callers = bbs which called func (set)
-            # tQueue.put(callers)
+            cgDist += nx.shortest_path_length(cfgnx, entryName, targetName)
+
+            # 如果没有函数调用里func, 证明前向分析到头了, 不需要再往队列里添加元素了
+            if not func in LINE_CALLS_DICT.keys():
+                continue
+
+            # 将调用了当前函数的bb和cgDist加入队列
+            for caller, pas in LINE_CALLS_DICT[func].items():
+                # 根据调用函数的对应关系替换preSet
+                nPreSet = preSet.copy()
+                for param, arguments in pas.items():
+                    try:
+                        nPreSet.remove(param)
+                        nPreSet |= arguments
+                    except KeyError:    # 若param没有受到污染, 跳过
+                        pass
+                tQueue.put((caller, cgDist, nPreSet))
 
         index += 1
 
