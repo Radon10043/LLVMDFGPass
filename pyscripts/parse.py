@@ -266,7 +266,10 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             entryLabel = FUNC_ENTRY_DICT[func]
             entryName = getNodeName(nodes, entryLabel)
 
-            # TODO: 若target为空, 则跳过
+            # 若无法获取target或entry的name, 跳过
+            if len(targetName) == 0 or len(entryName) == 0:
+                continue
+
             # TODO: 目前只有前向分析
 
             for node in nodes:
