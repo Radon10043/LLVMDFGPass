@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-02 14:29:21
+LastEditTime: 2022-04-04 12:16:32
 Description: Hi, say something
 '''
 from ast import arguments
@@ -248,11 +248,11 @@ def fitnessCalculation(path: str, tSrcsFile: str):
         if "def" in tv.keys():
             postSet = tv["def"]
 
-        tQueue = Queue()  # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
-        tQueue.put((tk, cgDist, preSet))
+        preQueue = Queue()  # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
+        preQueue.put((tk, cgDist, preSet))
 
-        while not tQueue.empty():
-            targetLabel, cgDist, preSet = tQueue.get()
+        while not preQueue.empty():
+            targetLabel, cgDist, preSet = preQueue.get()
             if targetLabel in visited:
                 continue
 
@@ -332,7 +332,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                         nPreSet |= arguments
                     except KeyError:  # 若param没有受到污染, 跳过
                         pass
-                tQueue.put((caller, cgDist, nPreSet))
+                preQueue.put((caller, cgDist, nPreSet))
 
             # 将该污点源加入集合, 防止重复计算
             visited.add(targetLabel)
