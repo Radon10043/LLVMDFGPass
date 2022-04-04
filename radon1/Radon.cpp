@@ -34,13 +34,15 @@ using namespace llvm;
 
 
 /* 全局变量 */
-std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;                            // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
-std::map<Value *, std::string> dbgLocMap;                                                                // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
-std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsMap; // 存储行调用关系和实参形参对应关系的map, <调用的函数, <位置, <形参, 实参(set)>>>
-std::map<std::string, std::set<std::string>> bbLineMap;                                                  // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
-std::map<std::string, std::string> funcEntryMap;                                                         // <函数名, 其cfg中入口BB的名字>
-std::map<std::string, std::string> bbFuncMap;                                                            // <bb名, 其所在函数名>
-std::map<std::string, std::string> linebbMap;                                                            // <行, 其所在bb>
+std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;                                // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
+std::map<Value *, std::string> dbgLocMap;                                                                    // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPreMap;  // 存储行调用关系和实参形参对应关系的map, <调用的函数, <位置, <形参, 实参(set)>>>
+std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPostMap; // 存储行调用关系和实参形参对应关系的map, <位置, <调用的函数, <形参, 实参(set)>>>
+std::map<std::string, std::set<std::string>> bbLineMap;                                                      // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
+std::map<std::string, std::string> funcEntryMap;                                                             // <函数名, 其cfg中入口BB的名字>
+std::map<std::string, std::string> bbFuncMap;                                                                // <bb名, 其所在函数名>
+std::map<std::string, std::string> linebbMap;                                                                // <行, 其所在bb>
+std::map<std::string, int> maxLineMap;                                                                       // <filename, 文件行数>
 
 
 namespace llvm {
@@ -281,6 +283,7 @@ bool RnDuPass::runOnModule(Module &M) {
         }
 
           dbgLocMap[&I] = loc;
+          maxLineMap[filename] = maxLineMap[filename] > line ? maxLineMap[filename] : line;
         } else
           continue;
 
@@ -308,7 +311,8 @@ bool RnDuPass::runOnModule(Module &M) {
                 if (argName.empty())
                   continue;
 
-                lineCallsMap[CalledF->getName().str()][loc][argName] = varVec[i];
+                lineCallsPreMap[CalledF->getName().str()][loc][argName] = varVec[i];
+                lineCallsPostMap[loc][CalledF->getName().str()][argName] = varVec[i];
                 i++;
               }
             }
@@ -444,31 +448,69 @@ bool RnDuPass::runOnModule(Module &M) {
   }
   linebbJ.objectEnd();
 
-  /* 将lineCallsMap转换为json并输出 */
-  raw_fd_ostream lineCallsJson(outDirectory + "/lineCalls.json", EC, sys::fs::F_None);
-  json::OStream lineCallsJ(lineCallsJson);
-  lineCallsJ.objectBegin();
-  for (auto it1 = lineCallsMap.begin(); it1 != lineCallsMap.end(); it1++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
-    lineCallsJ.attributeBegin(it1->first);
-    lineCallsJ.objectBegin();
-    for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-      lineCallsJ.attributeBegin(it2->first);
-      lineCallsJ.objectBegin();
-      for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
-        lineCallsJ.attributeBegin(it3->first);
-        lineCallsJ.arrayBegin();
-        for (auto var : it3->second)
-          lineCallsJ.value(var);
-        lineCallsJ.arrayEnd();
-        lineCallsJ.attributeEnd();
-      }
-      lineCallsJ.objectEnd();
-      lineCallsJ.attributeEnd();
-    }
-    lineCallsJ.objectEnd();
-    lineCallsJ.attributeEnd();
+  /* 将maxLineMap转为json并输出 */
+  raw_fd_ostream maxLineJson(outDirectory + "/maxLine.json", EC, sys::fs::F_None);
+  json::OStream maxLineJ(maxLineJson);
+  maxLineJ.objectBegin();
+  for (auto psi : maxLineMap) {
+    maxLineJ.attributeBegin(psi.first);
+    maxLineJ.value(psi.second);
+    maxLineJ.attributeEnd();
   }
-  lineCallsJ.objectEnd();
+  maxLineJ.objectEnd();
+
+  /* 将lineCallsPreMap转换为json并输出 */
+  raw_fd_ostream lineCallsPreJson(outDirectory + "/lineCallsPre.json", EC, sys::fs::F_None);
+  json::OStream lineCallsPreJ(lineCallsPreJson);
+  lineCallsPreJ.objectBegin();
+  for (auto it1 = lineCallsPreMap.begin(); it1 != lineCallsPreMap.end(); it1++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+    lineCallsPreJ.attributeBegin(it1->first);
+    lineCallsPreJ.objectBegin();
+    for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+      lineCallsPreJ.attributeBegin(it2->first);
+      lineCallsPreJ.objectBegin();
+      for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
+        lineCallsPreJ.attributeBegin(it3->first);
+        lineCallsPreJ.arrayBegin();
+        for (auto var : it3->second)
+          lineCallsPreJ.value(var);
+        lineCallsPreJ.arrayEnd();
+        lineCallsPreJ.attributeEnd();
+      }
+      lineCallsPreJ.objectEnd();
+      lineCallsPreJ.attributeEnd();
+    }
+    lineCallsPreJ.objectEnd();
+    lineCallsPreJ.attributeEnd();
+  }
+  lineCallsPreJ.objectEnd();
+
+  /* 将lineCallsPostMap转换为json并输出 */
+  raw_fd_ostream lineCallsPostJson(outDirectory + "/lineCallsPost.json", EC, sys::fs::F_None);
+  json::OStream lineCallsPostJ(lineCallsPostJson);
+  lineCallsPostJ.objectBegin();
+  for (auto it1 = lineCallsPostMap.begin(); it1 != lineCallsPostMap.end(); it1++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
+    lineCallsPostJ.attributeBegin(it1->first);
+    lineCallsPostJ.objectBegin();
+    for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+      lineCallsPostJ.attributeBegin(it2->first);
+      lineCallsPostJ.objectBegin();
+      for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
+        lineCallsPostJ.attributeBegin(it3->first);
+        lineCallsPostJ.arrayBegin();
+        for (auto var : it3->second)
+          lineCallsPostJ.value(var);
+        lineCallsPostJ.arrayEnd();
+        lineCallsPostJ.attributeEnd();
+      }
+      lineCallsPostJ.objectEnd();
+      lineCallsPostJ.attributeEnd();
+    }
+    lineCallsPostJ.objectEnd();
+    lineCallsPostJ.attributeEnd();
+  }
+  lineCallsPostJ.objectEnd();
+
 
   /* 将bbFuncMap转换为json并输出 */
   raw_fd_ostream bbFuncJson(outDirectory + "/bbFunc.json", EC, sys::fs::F_None);
