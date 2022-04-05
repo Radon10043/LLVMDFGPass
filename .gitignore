@@ -4,7 +4,9 @@ dfg-files*/
 out-files/
 temp/
 
-pyscripts/tSrcs.txt
+pyscripts/*.txt
+
+*.json
 
 *.s
 *.ll
