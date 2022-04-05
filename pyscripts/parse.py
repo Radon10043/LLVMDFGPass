@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-04 15:28:57
+LastEditTime: 2022-04-05 15:10:09
 Description: Hi, say something
 '''
 from ast import arguments
@@ -24,9 +24,9 @@ BB_LINE_DICT = dict()  # <bb名, 它所包含的所有行>
 BB_FUNC_DICT = dict()  # <bb名, 它所在的函数>
 FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
 LINE_CALLS_PRE_DICT = dict()  # <调用的函数, <行, <形参, {实参}>>>
-LINE_CALLS_POST_DICT = dict() # <行, <调用的函数, <形参, {实参}>>>
+LINE_CALLS_POST_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
-MAX_LINE_DICT = dict()
+MAX_LINE_DICT = dict()  # <文件名, 其最大行数>
 
 
 class MyNode:
@@ -106,17 +106,56 @@ def isPreTainted(bbname: str, preSet: set, defSet: set, useSet: set):
     return isTainted, defSet, useSet
 
 
-def isPostTainted(bbname: str, postSet: set, defSet: set, useSet: set):
+def isPostTainted(bbname: str, postSet: set, postQueue: Queue, distance: int):
+    """判断该基本块是否受到污染, 且若基本块所包含的行中调用了函数, 就加入到队列
+
+    Parameters
+    ----------
+    bbname : str
+        基本块名字
+    postSet : set
+        变量集合
+    postQueue : Queue
+        三元组队列
+    distance : int
+        该基本块与污点源之间的距离
+
+    Returns
+    -------
+    _type_
+        _description_
+
+    Notes
+    -----
+    _description_
+    """
     isTainted = False
+    bbDuSet = postSet.copy()
+
     for bbline in reversed(BB_LINE_DICT[bbname]):
+        # 查看该行是否调用了函数, 若调用了, 加入队列
         try:
-            if DU_VAR_DICT[bbline]["use"] & postSet:
-                isTainted = True
-                defSet |= DU_VAR_DICT[bbline]["def"]
-                useSet |= DU_VAR_DICT[bbline]["use"]
+            for calledF, pas in LINE_CALLS_POST_DICT[bbline].items():
+                targetLabel = FUNC_ENTRY_DICT[calledF]
+                nPostSet = postSet.copy()
+                for param, arguments in pas.items():
+                    if nPostSet & arguments:
+                        nPostSet -= arguments
+                        nPostSet.add(param)
+                if len(nPostSet) > 0:  # 如果更新后的变量集合为空的话, 加入队列也没有意义, 跳过
+                    postQueue.put((targetLabel, distance, nPostSet))
         except KeyError:
-            continue # 该行没有定义使用关系, 跳过
-    return isTainted, defSet, useSet
+            pass # 该行没有调用函数
+
+        # 根据每行的定义使用情况更新变量集合
+        try:
+            if DU_VAR_DICT[bbline]["use"] & bbDuSet:
+                isTainted = True
+                bbDuSet = bbDuSet - DU_VAR_DICT[bbline]["use"] | DU_VAR_DICT[bbline]["def"]
+        except KeyError:
+            pass  # 该行没有定义使用关系
+
+    return isTainted, bbDuSet
 
 
 def getbbPreTainted(loc: str, preSet: set):
@@ -160,6 +199,24 @@ def getbbPreTainted(loc: str, preSet: set):
 
 
 def getbbPostTainted(loc: str, postSet: set):
+    """根据行数获取其所在基本块的污染情况
+
+    Parameters
+    ----------
+    loc : str
+        文件名:行数
+    postSet : set
+        变量集合
+
+    Returns
+    -------
+    _type_
+        _description_
+
+    Notes
+    -----
+    _description_
+    """
     bbname = LINE_BB_DICT[loc]
 
     filename, line = loc.split(":")
@@ -234,7 +291,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             if "use" in v.keys():
                 v["use"] = set(v["use"])
 
-    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, LINE_CALLS_PRE_DICT, LINE_BB_DICT, MAX_LINE_DICT
+    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, LINE_CALLS_PRE_DICT, LINE_CALLS_POST_DICT, LINE_BB_DICT, MAX_LINE_DICT
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
         DU_VAR_DICT = json.load(f)
@@ -271,13 +328,18 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 for k3, v3 in v2.items():
                     LINE_CALLS_PRE_DICT[k1][k2][k3] = set(v3)
 
+    with open(path + "/lineCallsPost.json") as f:  # 该json存储里每一行的调用信息
+        LINE_CALLS_POST_DICT = json.load(f)
+        for k1, v1 in LINE_CALLS_POST_DICT.items():
+            for k2, v2 in v1.items():
+                for k3, v3 in v2.items():
+                    LINE_CALLS_POST_DICT[k1][k2][k3] = set(v3)
+
     with open(path + "/linebb.json") as f:  # 该json存储了每一行对应的基本块
         LINE_BB_DICT = json.load(f)
 
     with open(path + "/maxLine.json") as f:
         MAX_LINE_DICT = json.load(f)
-
-    # TODO: 下面的内容都不完整, 需要完善
 
     for tk, tv in tSrcs.items():
         cgDist = 0  # 函数调用之间的距离
@@ -386,7 +448,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             targetLabel, cgDist, postSet = postQueue.get()
             targetLabel, postSet = getbbPostTainted(targetLabel, postSet)
 
-            func = BB_FUNC_DICT[bbname]
+            func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
             pq = PriorityQueue()
 
@@ -402,7 +464,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 nodeName = node.obj_dict["name"]
                 try:
                     if nodeName == targetName:
-                        distance = 0
+                        distance = cgDist
                     else:
                         distance = nx.shortest_path_length(cfgnx, targetName, nodeName) + cgDist
                     pq.put(MyNode(distance, nodeName, nodeLabel))
@@ -410,26 +472,31 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                     pass  # 无法到达, 跳过
 
             nowDist = cgDist
-            defSet, useSet = set(), set()
+            bbSumDuSet = set()
             while not pq.empty():
                 node = pq.get()
                 distance, bbname = node.distance, node.label
 
-                # 同一宽度时, 统计def-use情况, 并存入集合
-                # 不同宽度时, 与useSet做差集, 与defSet做并集
+                # 同一宽度时, 根据每个bb的def-use对postSet的拷贝bbDuSet进行更新, 并将结果都存入bbSumDuSet
+                # 不同宽度时, 将bbSumDuSet的值拷贝到postSet
                 if distance != nowDist:
                     nowDist = distance
-                    postSet = postSet - useSet | defSet
-                    defSet.clear()
-                    useSet.clear()
+                    postSet = bbSumDuSet.copy()
+                    bbSumDuSet.clear()
 
                 if distance == cgDist:
                     isTainted = True
+                    bbSumDuSet = postSet.copy()
                 else:
-                    isTainted, defSet, useSet = isPostTainted(bbname, postSet, defSet, useSet)
+                    isTainted, bbDuSet = isPostTainted(bbname, postSet, postQueue, distance)
+                    bbSumDuSet |= bbDuSet
 
+                # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
-                    print(bbname + " is Tainted.")
+                    if not bbname in fitDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
+                        fitDict[bbname] = [0] * len(tSrcs)
+                    fitness = 1 / (1 + distance)
+                    fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
 
         index += 1
 
