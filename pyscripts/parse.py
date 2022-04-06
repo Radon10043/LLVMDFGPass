@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-05 15:10:09
+LastEditTime: 2022-04-06 13:46:55
 Description: Hi, say something
 '''
 from ast import arguments
@@ -69,7 +69,7 @@ def myCmp(x, y):
     return 0
 
 
-def isPreTainted(bbname: str, preSet: set, defSet: set, useSet: set):
+def isPreTainted(bbname: str, preSet: set):
     """查看该基本块是否被前向污染了
 
     Parameters
@@ -95,15 +95,16 @@ def isPreTainted(bbname: str, preSet: set, defSet: set, useSet: set):
     _description_
     """
     isTainted = False
+    bbDuSet = preSet.copy()
+
     for bbline in BB_LINE_DICT[bbname]:
         try:
             if DU_VAR_DICT[bbline]["def"] & preSet:
                 isTainted = True
-                defSet |= DU_VAR_DICT[bbline]["def"]
-                useSet |= DU_VAR_DICT[bbline]["use"]
+                bbDuSet = bbDuSet - DU_VAR_DICT[bbline]["def"] | DU_VAR_DICT[bbline]["use"]
         except KeyError:
             continue  # 该行没有定义-使用关系, 跳过
-    return isTainted, defSet, useSet
+    return isTainted, bbDuSet
 
 
 def isPostTainted(bbname: str, postSet: set, postQueue: Queue, distance: int):
@@ -145,7 +146,7 @@ def isPostTainted(bbname: str, postSet: set, postQueue: Queue, distance: int):
                 if len(nPostSet) > 0:  # 如果更新后的变量集合为空的话, 加入队列也没有意义, 跳过
                     postQueue.put((targetLabel, distance, nPostSet))
         except KeyError:
-            pass # 该行没有调用函数
+            pass  # 该行没有调用函数
 
         # 根据每行的定义使用情况更新变量集合
         try:
@@ -195,7 +196,7 @@ def getbbPreTainted(loc: str, preSet: set):
         except KeyError:
             continue  # 该行没有定义-使用关系, 跳过
 
-    return loc, preSet
+    return loc
 
 
 def getbbPostTainted(loc: str, postSet: set):
@@ -236,7 +237,7 @@ def getbbPostTainted(loc: str, postSet: set):
         except KeyError:
             continue  # 该行没有定义使用关系
 
-    return bbname, postSet
+    return bbname
 
 
 def getNodeName(nodes, nodeLabel) -> str:
@@ -363,7 +364,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             if targetLabel in visited:
                 continue
 
-            targetLabel, preSet = getbbPreTainted(targetLabel, preSet)
+            targetLabel = getbbPreTainted(targetLabel, preSet)
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
@@ -396,7 +397,7 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                     pass
 
             nowDist = cgDist  # nowDist用于判断当前节点与上一节点是否是同一宽度
-            defSet, useSet = set(), set()
+            bbSumDuSet = set()
             while not pq.empty():
                 node = pq.get()
                 distance, bbname = node.distance, node.label
@@ -405,15 +406,16 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                 # 不同宽度时, 与defSet做差集, 与useSet做并集
                 if distance != nowDist:
                     nowDist = distance
-                    preSet = preSet - defSet | useSet
-                    defSet.clear()
-                    useSet.clear()
+                    preSet = bbSumDuSet.copy()
+                    bbSumDuSet.clear()
 
                 # 如果距离与cg间的距离相等, 证明该基本块就是污点源基本块或调用里能到达污点源函数的基本块, 一定是被污染的
                 if distance == cgDist:
                     isTainted = True
+                    bbSumDuSet = preSet.copy()
                 else:
-                    isTainted, defSet, useSet = isPreTainted(bbname, preSet, defSet, useSet)
+                    isTainted, bbDuSet = isPreTainted(bbname, preSet)
+                    bbSumDuSet |= bbDuSet
 
                 # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
@@ -444,9 +446,14 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             visited.add(targetLabel)
 
         # 后向污点分析
+        visited = set()
         while not postQueue.empty():
             targetLabel, cgDist, postSet = postQueue.get()
-            targetLabel, postSet = getbbPostTainted(targetLabel, postSet)
+
+            if targetLabel in visited:
+                continue
+
+            targetLabel = getbbPostTainted(targetLabel, postSet)
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
@@ -497,6 +504,8 @@ def fitnessCalculation(path: str, tSrcsFile: str):
                         fitDict[bbname] = [0] * len(tSrcs)
                     fitness = 1 / (1 + distance)
                     fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
+
+            visited.add(targetLabel)
 
         index += 1
 
