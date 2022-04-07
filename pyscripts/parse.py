@@ -13,6 +13,7 @@ import sys
 import json
 import heapq
 import functools
+import copy
 
 import networkx as nx
 
@@ -265,7 +266,7 @@ def getNodeName(nodes, nodeLabel) -> str:
     return ""
 
 
-def fitnessCalculation(path: str, tSrcsFile: str):
+def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
     """计算各基本块的适应度
 
     Parameters
@@ -283,14 +284,6 @@ def fitnessCalculation(path: str, tSrcsFile: str):
     fitDict = dict()  # <bb名, 适应度数组>
     resDict = dict()  # <bb名, 适应度>
     index = 0  # 下标
-
-    with open(tSrcsFile) as f:  # 读取污点源,
-        tSrcs = json.load(f)
-        for k, v in tSrcs.items():
-            if "def" in v.keys():
-                v["def"] = set(v["def"])
-            if "use" in v.keys():
-                v["use"] = set(v["use"])
 
     global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, LINE_CALLS_PRE_DICT, LINE_CALLS_POST_DICT, LINE_BB_DICT, MAX_LINE_DICT
 
@@ -342,6 +335,14 @@ def fitnessCalculation(path: str, tSrcsFile: str):
     with open(path + "/maxLine.json") as f:
         MAX_LINE_DICT = json.load(f)
 
+    with open(tSrcsFile) as f:
+        lines = f.readlines()
+        for line in lines:
+            try:
+                line = line.rstrip("\n")
+                tSrcs[line] = copy.deepcopy(DU_VAR_DICT[line])
+            except:
+                pass
     for tk, tv in tSrcs.items():
         cgDist = 0  # 函数调用之间的距离
         visited = set()  # 防止重复计算
@@ -361,8 +362,14 @@ def fitnessCalculation(path: str, tSrcsFile: str):
         # 前向污点分析
         while not preQueue.empty():
             targetLabel, cgDist, preSet = preQueue.get()
+
             if targetLabel in visited:
                 continue
+
+            if cgDist > 100:
+                continue
+
+            print("Pre analyzing " + targetLabel + "..., cgDist: ", cgDist)
 
             targetLabel = getbbPreTainted(targetLabel, preSet)
 
@@ -387,6 +394,10 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             for node in nodes:
                 nodeLabel = node.get("label").lstrip("\"{").rstrip(":}\"")
                 nodeName = node.obj_dict["name"]
+
+                if len(nodeLabel.split(":")) > 2:
+                    nodeLabel = ":".join(nodeLabel.split(":")[0:2])
+
                 try:
                     if nodeName == targetName:
                         distance = cgDist
@@ -453,13 +464,18 @@ def fitnessCalculation(path: str, tSrcsFile: str):
             if targetLabel in visited:
                 continue
 
+            if cgDist > 100:
+                continue
+
+            print("Post analyzing " + targetLabel + "..., cgDist: ", cgDist)
+
             targetLabel = getbbPostTainted(targetLabel, postSet)
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
             pq = PriorityQueue()
 
-            cfgdot = pydot.graph_from_dot_file(path + "/" + cfg)[0]
+            cfgdot = pydot.graph_from_dot_file(dotPath + "/" + cfg)[0]
             cfgnx = nx.drawing.nx_pydot.from_pydot(cfgdot)
             nodes = cfgdot.get_nodes()
 
@@ -510,11 +526,15 @@ def fitnessCalculation(path: str, tSrcsFile: str):
         index += 1
 
     print(fitDict)
+    with open(path + "/fitness.cfg.txt", mode="w") as f:
+        for bb, fit in fitDict.items():
+            f.write(bb + "," + str(fit) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--path", help="存储dot, json, txt等文件的目录", required=True)
+    parser.add_argument("-p", "--path", help="存储json, txt等文件的目录", required=True)
+    parser.add_argument("-d", "--dot", help="存储dot文件的目录", required=True)
     parser.add_argument("-t", "--taint", help="存储污点源信息的txt文件", required=True)
     args = parser.parse_args()
-    fitnessCalculation(args.path, args.taint)
+    fitnessCalculation(args.path, args.dot, args.taint)
