@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-06 13:46:55
+LastEditTime: 2022-04-07 16:28:59
 Description: Hi, say something
 '''
 from ast import arguments
@@ -343,6 +343,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                 tSrcs[line] = copy.deepcopy(DU_VAR_DICT[line])
             except:
                 pass
+
     for tk, tv in tSrcs.items():
         cgDist = 0  # 函数调用之间的距离
         visited = set()  # 防止重复计算
@@ -377,7 +378,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             cfg = "cfg." + func + ".dot"
             pq = PriorityQueue()
 
-            cfgdot = pydot.graph_from_dot_file(path + "/" + cfg)[0]
+            cfgdot = pydot.graph_from_dot_file(dotPath + "/" + cfg)[0]
             cfgnx = nx.drawing.nx_pydot.from_pydot(cfgdot)
             nodes = cfgdot.get_nodes()
 
