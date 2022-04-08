@@ -2,22 +2,23 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-07 16:28:59
+LastEditTime: 2022-04-08 12:06:28
 Description: Hi, say something
 '''
-from ast import arguments
-import pydot
 import argparse
+import copy
+import functools
+import heapq
+import json
 import os
 import sys
-import json
-import heapq
-import functools
-import copy
+import time
+from ast import arguments
+from queue import PriorityQueue, Queue
+from statistics import mean
 
 import networkx as nx
-
-from queue import Queue, PriorityQueue
+import pydot
 
 # Global
 DU_VAR_DICT = dict()  # <行, <def/use, {变量}>>
@@ -526,9 +527,14 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
 
         index += 1
 
-    print(fitDict)
+    print("Calculating average ...")
+
+    for bb, fits in fitDict.items():
+        fits = [fit for fit in fits if fit > 0]
+        resDict[bb] = mean(fits)
+
     with open(path + "/fitness.cfg.txt", mode="w") as f:
-        for bb, fit in fitDict.items():
+        for bb, fit in resDict.items():
             f.write(bb + "," + str(fit) + "\n")
 
 
@@ -538,4 +544,8 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--dot", help="存储dot文件的目录", required=True)
     parser.add_argument("-t", "--taint", help="存储污点源信息的txt文件", required=True)
     args = parser.parse_args()
+
+    start = time.time()
     fitnessCalculation(args.path, args.dot, args.taint)
+    end = time.time()
+    print("Calculation is finished, consumed %f seconds." % (end - start))
