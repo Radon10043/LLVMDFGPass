@@ -36,6 +36,8 @@ using namespace llvm;
 /* 全局变量 */
 std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;                                // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
 std::map<Value *, std::string> dbgLocMap;                                                                    // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::vector<std::string>> funcParamMap;                                                // 存储函数和其形参的map, 用这个map主要是为了防止出现跨文件调用函数时参数丢失的问题
+std::map<std::string, std::map<std::string, std::vector<std::set<std::string>>>> callArgsMap;                // <行, <调用的函数, 实参>>
 std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPreMap;  // 存储行调用关系和实参形参对应关系的map, <调用的函数, <位置, <形参, 实参(set)>>>
 std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPostMap; // 存储行调用关系和实参形参对应关系的map, <位置, <调用的函数, <形参, 实参(set)>>>
 std::map<std::string, std::set<std::string>> bbLineMap;                                                      // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
@@ -248,6 +250,22 @@ bool RnDuPass::runOnModule(Module &M) {
     if (isBlacklisted(&F))
       continue;
 
+    /* 获取函数的Param列表, 防止出现跨文件调用函数时参数丢失的问题 */
+    std::vector<std::string> paramVec;
+    bool hasEmptyParam = false;
+    for (auto arg = F.arg_begin(); arg != F.arg_end(); arg++) {
+      std::string paramName = arg->getName().str(); // 虽然是arg->getName(), 但实际上获得的是param的name
+      if (paramName.empty()) {
+        hasEmptyParam = true;
+        break;
+      }
+      paramVec.emplace_back(arg->getName().str());
+    }
+
+    /* 不存在空形参名的话, 就加入到map */
+    if (!hasEmptyParam)
+      funcParamMap[F.getName().str()] = paramVec;
+
     for (auto &BB : F) {
 
       std::string bbname;
@@ -280,13 +298,12 @@ bool RnDuPass::runOnModule(Module &M) {
           if (!bbname.empty()) { // 若基本块名字不为空, 将该行加入到map
             bbLineMap[bbname].insert(loc);
             linebbMap[loc] = bbname;
-        }
+          }
 
           dbgLocMap[&I] = loc;
           maxLineMap[filename] = maxLineMap[filename] > line ? maxLineMap[filename] : line;
         } else
           continue;
-
 
         /* 获取函数调用信息 */
         if (auto *c = dyn_cast<CallInst>(&I)) {
@@ -303,17 +320,10 @@ bool RnDuPass::runOnModule(Module &M) {
               }
 
               /* 将函数和其参数对应的信息写入map */
-              int i = 0, n = varVec.size();
-              for (auto arg = CalledF->arg_begin(); arg != CalledF->arg_end(); arg++) {
-
-                std::string argName = arg->getName().str();
-
-                if (argName.empty())
-                  continue;
-
-                lineCallsPreMap[CalledF->getName().str()][loc][argName] = varVec[i];
-                lineCallsPostMap[loc][CalledF->getName().str()][argName] = varVec[i];
-                i++;
+              for (int i = 0; i < CalledF->arg_size(); i++) {
+                if (i > varVec.size())
+                  break;
+                callArgsMap[loc][CalledF->getName().str()].push_back(varVec[i]);
               }
             }
           }
@@ -398,9 +408,16 @@ bool RnDuPass::runOnModule(Module &M) {
     }
   }
 
+  int fileIdx = 0;
+  for (;; fileIdx++) {
+    std::fstream tmpF(outDirectory + "/duVar" + std::to_string(fileIdx) + ".json");
+    if (!tmpF)
+      break;
+  }
+
   /* 将duVarMap转换为json并输出 */
   std::error_code EC;
-  raw_fd_ostream duVarJson(outDirectory + "/duVar.json", EC, sys::fs::F_None);
+  raw_fd_ostream duVarJson(outDirectory + "/duVar" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream duVarJ(duVarJson);
   duVarJ.objectBegin();
   for (auto it = duVarMap.begin(); it != duVarMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
@@ -424,7 +441,7 @@ bool RnDuPass::runOnModule(Module &M) {
   duVarJ.objectEnd();
 
   /* 将bbLineMap转为json并输出 */
-  raw_fd_ostream bbLineJson(outDirectory + "/bbLine.json", EC, sys::fs::F_None);
+  raw_fd_ostream bbLineJson(outDirectory + "/bbLine" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream bbLineJ(bbLineJson);
   bbLineJ.objectBegin();
   for (auto it = bbLineMap.begin(); it != bbLineMap.end(); it++) {
@@ -438,7 +455,7 @@ bool RnDuPass::runOnModule(Module &M) {
   bbLineJ.objectEnd();
 
   /* 将linebbMap转为json并输出 */
-  raw_fd_ostream linebbJson(outDirectory + "/linebb.json", EC, sys::fs::F_None);
+  raw_fd_ostream linebbJson(outDirectory + "/linebb." + std::to_string(fileIdx) + "json", EC, sys::fs::F_None);
   json::OStream linebbJ(linebbJson);
   linebbJ.objectBegin();
   for (auto pss : linebbMap) {
@@ -449,7 +466,7 @@ bool RnDuPass::runOnModule(Module &M) {
   linebbJ.objectEnd();
 
   /* 将maxLineMap转为json并输出 */
-  raw_fd_ostream maxLineJson(outDirectory + "/maxLine.json", EC, sys::fs::F_None);
+  raw_fd_ostream maxLineJson(outDirectory + "/maxLine" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream maxLineJ(maxLineJson);
   maxLineJ.objectBegin();
   for (auto psi : maxLineMap) {
@@ -459,61 +476,47 @@ bool RnDuPass::runOnModule(Module &M) {
   }
   maxLineJ.objectEnd();
 
-  /* 将lineCallsPreMap转换为json并输出 */
-  raw_fd_ostream lineCallsPreJson(outDirectory + "/lineCallsPre.json", EC, sys::fs::F_None);
-  json::OStream lineCallsPreJ(lineCallsPreJson);
-  lineCallsPreJ.objectBegin();
-  for (auto it1 = lineCallsPreMap.begin(); it1 != lineCallsPreMap.end(); it1++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
-    lineCallsPreJ.attributeBegin(it1->first);
-    lineCallsPreJ.objectBegin();
-    for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-      lineCallsPreJ.attributeBegin(it2->first);
-      lineCallsPreJ.objectBegin();
-      for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
-        lineCallsPreJ.attributeBegin(it3->first);
-        lineCallsPreJ.arrayBegin();
-        for (auto var : it3->second)
-          lineCallsPreJ.value(var);
-        lineCallsPreJ.arrayEnd();
-        lineCallsPreJ.attributeEnd();
-      }
-      lineCallsPreJ.objectEnd();
-      lineCallsPreJ.attributeEnd();
-    }
-    lineCallsPreJ.objectEnd();
-    lineCallsPreJ.attributeEnd();
+  /* 将funcParamMap转换为json并输出 */
+  raw_fd_ostream funcParamJson(outDirectory + "/funcParam" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
+  json::OStream funcParamJ(funcParamJson);
+  funcParamJ.objectBegin();
+  for (auto it = funcParamMap.begin(); it != funcParamMap.end(); it++) {
+    funcParamJ.attributeBegin(it->first);
+    funcParamJ.arrayBegin();
+    for (auto param : it->second)
+      funcParamJ.value(param);
+    funcParamJ.arrayEnd();
+    funcParamJ.attributeEnd();
   }
-  lineCallsPreJ.objectEnd();
+  funcParamJ.objectEnd();
 
-  /* 将lineCallsPostMap转换为json并输出 */
-  raw_fd_ostream lineCallsPostJson(outDirectory + "/lineCallsPost.json", EC, sys::fs::F_None);
-  json::OStream lineCallsPostJ(lineCallsPostJson);
-  lineCallsPostJ.objectBegin();
-  for (auto it1 = lineCallsPostMap.begin(); it1 != lineCallsPostMap.end(); it1++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
-    lineCallsPostJ.attributeBegin(it1->first);
-    lineCallsPostJ.objectBegin();
-    for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-      lineCallsPostJ.attributeBegin(it2->first);
-      lineCallsPostJ.objectBegin();
-      for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
-        lineCallsPostJ.attributeBegin(it3->first);
-        lineCallsPostJ.arrayBegin();
-        for (auto var : it3->second)
-          lineCallsPostJ.value(var);
-        lineCallsPostJ.arrayEnd();
-        lineCallsPostJ.attributeEnd();
+  /* 将callArgsMap转换为json并输出 */
+  raw_fd_ostream callArgsJson(outDirectory + "/callArgs" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
+  json::OStream callArgsJ(callArgsJson);
+  callArgsJ.objectBegin();
+  for (auto it = callArgsMap.begin(); it != callArgsMap.end(); it++) {
+    callArgsJ.attributeBegin(it->first);
+    callArgsJ.objectBegin();
+    for (auto iit = it->second.begin(); iit != it->second.end(); iit++) {
+      callArgsJ.attributeBegin(iit->first);
+      callArgsJ.arrayBegin();
+      for (auto args : iit->second) {
+        callArgsJ.arrayBegin();
+        for (auto arg : args) {
+          callArgsJ.value(arg);
+        }
+        callArgsJ.arrayEnd();
       }
-      lineCallsPostJ.objectEnd();
-      lineCallsPostJ.attributeEnd();
+      callArgsJ.arrayEnd();
+      callArgsJ.attributeEnd();
     }
-    lineCallsPostJ.objectEnd();
-    lineCallsPostJ.attributeEnd();
+    callArgsJ.objectEnd();
+    callArgsJ.attributeEnd();
   }
-  lineCallsPostJ.objectEnd();
-
+  callArgsJ.objectEnd();
 
   /* 将bbFuncMap转换为json并输出 */
-  raw_fd_ostream bbFuncJson(outDirectory + "/bbFunc.json", EC, sys::fs::F_None);
+  raw_fd_ostream bbFuncJson(outDirectory + "/bbFunc" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream bbFuncJ(bbFuncJson);
   bbFuncJ.objectBegin();
   for (auto it = bbFuncMap.begin(); it != bbFuncMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
@@ -584,7 +587,7 @@ bool RnDuPass::runOnModule(Module &M) {
   }
 
   /* 将funcEntryMap转换为json并输出 */
-  raw_fd_ostream funcEntryJson(outDirectory + "/funcEntry.json", EC, sys::fs::F_None);
+  raw_fd_ostream funcEntryJson(outDirectory + "/funcEntry" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream funcEntryJ(funcEntryJson);
   funcEntryJ.objectBegin();
   for (auto it = funcEntryMap.begin(); it != funcEntryMap.end(); it++) { // 遍历map并转换为json, llvm的json似乎不会自动格式化?
