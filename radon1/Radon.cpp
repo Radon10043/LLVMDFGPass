@@ -38,8 +38,6 @@ std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;   
 std::map<Value *, std::string> dbgLocMap;                                                                    // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
 std::map<std::string, std::vector<std::string>> funcParamMap;                                                // 存储函数和其形参的map, 用这个map主要是为了防止出现跨文件调用函数时参数丢失的问题
 std::map<std::string, std::map<std::string, std::vector<std::set<std::string>>>> callArgsMap;                // <行, <调用的函数, 实参>>
-std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPreMap;  // 存储行调用关系和实参形参对应关系的map, <调用的函数, <位置, <形参, 实参(set)>>>
-std::map<std::string, std::map<std::string, std::map<std::string, std::set<std::string>>>> lineCallsPostMap; // 存储行调用关系和实参形参对应关系的map, <位置, <调用的函数, <形参, 实参(set)>>>
 std::map<std::string, std::set<std::string>> bbLineMap;                                                      // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
 std::map<std::string, std::string> funcEntryMap;                                                             // <函数名, 其cfg中入口BB的名字>
 std::map<std::string, std::string> bbFuncMap;                                                                // <bb名, 其所在函数名>
@@ -455,7 +453,7 @@ bool RnDuPass::runOnModule(Module &M) {
   bbLineJ.objectEnd();
 
   /* 将linebbMap转为json并输出 */
-  raw_fd_ostream linebbJson(outDirectory + "/linebb." + std::to_string(fileIdx) + "json", EC, sys::fs::F_None);
+  raw_fd_ostream linebbJson(outDirectory + "/linebb" + std::to_string(fileIdx) + ".json", EC, sys::fs::F_None);
   json::OStream linebbJ(linebbJson);
   linebbJ.objectBegin();
   for (auto pss : linebbMap) {
