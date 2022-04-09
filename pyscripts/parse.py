@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-08 12:06:28
+LastEditTime: 2022-04-09 15:06:34
 Description: Hi, say something
 '''
 import argparse
@@ -25,6 +25,8 @@ DU_VAR_DICT = dict()  # <行, <def/use, {变量}>>
 BB_LINE_DICT = dict()  # <bb名, 它所包含的所有行>
 BB_FUNC_DICT = dict()  # <bb名, 它所在的函数>
 FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
+FUNC_PARAM_DICT = dict() # <函数名, [形参列表]>
+CALL_ARGS_DICT = dict() # <行, <被调用的函数, [[实参]]>>
 LINE_CALLS_PRE_DICT = dict()  # <调用的函数, <行, <形参, {实参}>>>
 LINE_CALLS_POST_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
@@ -286,7 +288,8 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
     resDict = dict()  # <bb名, 适应度>
     index = 0  # 下标
 
-    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, LINE_CALLS_PRE_DICT, LINE_CALLS_POST_DICT, LINE_BB_DICT, MAX_LINE_DICT
+    global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, FUNC_PARAM_DICT, CALL_ARGS_DICT
+    global LINE_CALLS_PRE_DICT, LINE_CALLS_POST_DICT, LINE_BB_DICT, MAX_LINE_DICT
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
         DU_VAR_DICT = json.load(f)
@@ -316,19 +319,34 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
         for k, v in FUNC_ENTRY_DICT.items():
             FUNC_ENTRY_DICT[k] = v.rstrip(":")
 
-    with open(path + "/lineCallsPre.json") as f:  # 该json存储里每一行的调用信息
-        LINE_CALLS_PRE_DICT = json.load(f)
-        for k1, v1 in LINE_CALLS_PRE_DICT.items():
-            for k2, v2 in v1.items():
-                for k3, v3 in v2.items():
-                    LINE_CALLS_PRE_DICT[k1][k2][k3] = set(v3)
+    with open(path + "/funcParam.json") as f:
+        FUNC_PARAM_DICT = json.load(f)
 
-    with open(path + "/lineCallsPost.json") as f:  # 该json存储里每一行的调用信息
-        LINE_CALLS_POST_DICT = json.load(f)
-        for k1, v1 in LINE_CALLS_POST_DICT.items():
-            for k2, v2 in v1.items():
-                for k3, v3 in v2.items():
-                    LINE_CALLS_POST_DICT[k1][k2][k3] = set(v3)
+    with open(path + "/callArgs.json") as f:
+        CALL_ARGS_DICT = json.load(f)
+
+    for line, vDict in CALL_ARGS_DICT.items():
+        for func, args in vDict.items():
+            if not func in FUNC_PARAM_DICT.keys():
+                continue
+
+            if len(FUNC_PARAM_DICT[func]) < 1:
+                continue
+
+            if not func in LINE_CALLS_PRE_DICT.keys():
+                LINE_CALLS_PRE_DICT[func] = dict()
+            LINE_CALLS_PRE_DICT[func][line] = dict()
+
+            if not line in LINE_CALLS_POST_DICT.keys():
+                LINE_CALLS_POST_DICT[line] = dict()
+            LINE_CALLS_POST_DICT[line][func] = dict()
+
+            params = FUNC_PARAM_DICT[func]
+
+            for i in range(min(len(params), len(args))):
+                param = FUNC_PARAM_DICT[func][i]
+                LINE_CALLS_PRE_DICT[func][line][param] = set(args[i])
+                LINE_CALLS_POST_DICT[line][func][param] = set(args[i])
 
     with open(path + "/linebb.json") as f:  # 该json存储了每一行对应的基本块
         LINE_BB_DICT = json.load(f)
@@ -373,7 +391,10 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
 
             print("Pre analyzing " + targetLabel + "..., cgDist: ", cgDist)
 
+            try:
             targetLabel = getbbPreTainted(targetLabel, preSet)
+            except:
+                continue
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
@@ -427,8 +448,11 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                     isTainted = True
                     bbSumDuSet = preSet.copy()
                 else:
+                    try:
                     isTainted, bbDuSet = isPreTainted(bbname, preSet)
                     bbSumDuSet |= bbDuSet
+                    except:
+                        isTainted = False
 
                 # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
