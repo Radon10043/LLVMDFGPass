@@ -34,15 +34,15 @@ using namespace llvm;
 
 
 /* 全局变量 */
-std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;                                // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
-std::map<Value *, std::string> dbgLocMap;                                                                    // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
-std::map<std::string, std::vector<std::string>> funcParamMap;                                                // 存储函数和其形参的map, 用这个map主要是为了防止出现跨文件调用函数时参数丢失的问题
-std::map<std::string, std::map<std::string, std::vector<std::set<std::string>>>> callArgsMap;                // <行, <调用的函数, 实参>>
-std::map<std::string, std::set<std::string>> bbLineMap;                                                      // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
-std::map<std::string, std::string> funcEntryMap;                                                             // <函数名, 其cfg中入口BB的名字>
-std::map<std::string, std::string> bbFuncMap;                                                                // <bb名, 其所在函数名>
-std::map<std::string, std::string> linebbMap;                                                                // <行, 其所在bb>
-std::map<std::string, int> maxLineMap;                                                                       // <filename, 文件行数>
+std::map<std::string, std::map<std::string, std::set<std::string>>> duVarMap;                 // 存储变量的def-use信息的map: <文件名与行号, <def/use, 变量>>
+std::map<Value *, std::string> dbgLocMap;                                                     // 存储指令和其对应的在源文件中位置的map, <指令, 文件名与行号>
+std::map<std::string, std::vector<std::string>> funcParamMap;                                 // 存储函数和其形参的map, 用这个map主要是为了防止出现跨文件调用函数时参数丢失的问题
+std::map<std::string, std::map<std::string, std::vector<std::set<std::string>>>> callArgsMap; // <行, <调用的函数, 实参>>
+std::map<std::string, std::set<std::string>> bbLineMap;                                       // 存储bb和其所包含所有行的map, <bb名字, 集合(包含的所有行)>
+std::map<std::string, std::string> funcEntryMap;                                              // <函数名, 其cfg中入口BB的名字>
+std::map<std::string, std::string> bbFuncMap;                                                 // <bb名, 其所在函数名>
+std::map<std::string, std::string> linebbMap;                                                 // <行, 其所在bb>
+std::map<std::string, int> maxLineMap;                                                        // <filename, 文件行数>
 
 
 namespace llvm {
@@ -222,6 +222,11 @@ static void fsearchCall(Instruction::op_iterator op, std::string &varName, std::
       fsearchCall(op, varName, vars);
 
   } else if (!varName.empty()) {
+
+    size_t found = varName.find(".addr");
+    if (found != std::string::npos)
+      varName = varName.substr(found + 1);
+
     vars.insert(varName);
   }
 }
