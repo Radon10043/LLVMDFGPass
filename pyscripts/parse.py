@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-09 15:06:34
+LastEditTime: 2022-04-24 14:39:58
 Description: Hi, say something
 '''
 import argparse
@@ -28,7 +28,7 @@ FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
 FUNC_PARAM_DICT = dict() # <函数名, [形参列表]>
 CALL_ARGS_DICT = dict() # <行, <被调用的函数, [[实参]]>>
 LINE_CALLS_PRE_DICT = dict()  # <调用的函数, <行, <形参, {实参}>>>
-LINE_CALLS_POST_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
+LINE_CALLS_BACK_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
 MAX_LINE_DICT = dict()  # <文件名, 其最大行数>
 
@@ -111,16 +111,16 @@ def isPreTainted(bbname: str, preSet: set):
     return isTainted, bbDuSet
 
 
-def isPostTainted(bbname: str, postSet: set, postQueue: Queue, distance: int):
+def isBackTainted(bbname: str, backSet: set, backQueue: Queue, distance: int):
     """判断该基本块是否受到污染, 且若基本块所包含的行中调用了函数, 就加入到队列
 
     Parameters
     ----------
     bbname : str
         基本块名字
-    postSet : set
+    backSet : set
         变量集合
-    postQueue : Queue
+    backQueue : Queue
         三元组队列
     distance : int
         该基本块与污点源之间的距离
@@ -135,20 +135,20 @@ def isPostTainted(bbname: str, postSet: set, postQueue: Queue, distance: int):
     _description_
     """
     isTainted = False
-    bbDuSet = postSet.copy()
+    bbDuSet = backSet.copy()
 
     for bbline in reversed(BB_LINE_DICT[bbname]):
         # 查看该行是否调用了函数, 若调用了, 加入队列
         try:
-            for calledF, pas in LINE_CALLS_POST_DICT[bbline].items():
+            for calledF, pas in LINE_CALLS_BACK_DICT[bbline].items():
                 targetLabel = FUNC_ENTRY_DICT[calledF]
-                nPostSet = postSet.copy()
+                nBackSet = backSet.copy()
                 for param, arguments in pas.items():
-                    if nPostSet & arguments:
-                        nPostSet -= arguments
-                        nPostSet.add(param)
-                if len(nPostSet) > 0:  # 如果更新后的变量集合为空的话, 加入队列也没有意义, 跳过
-                    postQueue.put((targetLabel, distance, nPostSet))
+                    if nBackSet & arguments:
+                        nBackSet -= arguments
+                        nBackSet.add(param)
+                if len(nBackSet) > 0:  # 如果更新后的变量集合为空的话, 加入队列也没有意义, 跳过
+                    backQueue.put((targetLabel, distance, nBackSet))
         except KeyError:
             pass  # 该行没有调用函数
 
@@ -203,14 +203,14 @@ def getbbPreTainted(loc: str, preSet: set):
     return loc
 
 
-def getbbPostTainted(loc: str, postSet: set):
+def getbbBackTainted(loc: str, backSet: set):
     """根据行数获取其所在基本块的污染情况
 
     Parameters
     ----------
     loc : str
         文件名:行数
-    postSet : set
+    backSet : set
         变量集合
 
     Returns
@@ -236,8 +236,8 @@ def getbbPostTainted(loc: str, postSet: set):
             break  # 如果顺序遍历到文件末尾了, 跳出循环
 
         try:
-            if DU_VAR_DICT[loc]["use"] & postSet:
-                postSet = postSet - DU_VAR_DICT[loc]["use"] | DU_VAR_DICT[loc]["def"]
+            if DU_VAR_DICT[loc]["use"] & backSet:
+                backSet = backSet - DU_VAR_DICT[loc]["use"] | DU_VAR_DICT[loc]["def"]
         except KeyError:
             continue  # 该行没有定义使用关系
 
@@ -289,7 +289,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
     index = 0  # 下标
 
     global DU_VAR_DICT, BB_LINE_DICT, BB_FUNC_DICT, FUNC_ENTRY_DICT, FUNC_PARAM_DICT, CALL_ARGS_DICT
-    global LINE_CALLS_PRE_DICT, LINE_CALLS_POST_DICT, LINE_BB_DICT, MAX_LINE_DICT
+    global LINE_CALLS_PRE_DICT, LINE_CALLS_BACK_DICT, LINE_BB_DICT, MAX_LINE_DICT
 
     with open(path + "/duVar.json") as f:  # 读取定义使用关系的json文件
         DU_VAR_DICT = json.load(f)
@@ -337,16 +337,16 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                 LINE_CALLS_PRE_DICT[func] = dict()
             LINE_CALLS_PRE_DICT[func][line] = dict()
 
-            if not line in LINE_CALLS_POST_DICT.keys():
-                LINE_CALLS_POST_DICT[line] = dict()
-            LINE_CALLS_POST_DICT[line][func] = dict()
+            if not line in LINE_CALLS_BACK_DICT.keys():
+                LINE_CALLS_BACK_DICT[line] = dict()
+            LINE_CALLS_BACK_DICT[line][func] = dict()
 
             params = FUNC_PARAM_DICT[func]
 
             for i in range(min(len(params), len(args))):
                 param = FUNC_PARAM_DICT[func][i]
                 LINE_CALLS_PRE_DICT[func][line][param] = set(args[i])
-                LINE_CALLS_POST_DICT[line][func][param] = set(args[i])
+                LINE_CALLS_BACK_DICT[line][func][param] = set(args[i])
 
     with open(path + "/linebb.json") as f:  # 该json存储了每一行对应的基本块
         LINE_BB_DICT = json.load(f)
@@ -367,17 +367,17 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
         cgDist = 0  # 函数调用之间的距离
         visited = set()  # 防止重复计算
 
-        preSet, postSet = set(), set()
+        preSet, backSet = set(), set()
         if "use" in tv.keys():
             preSet = tv["use"]
         if "def" in tv.keys():
-            postSet = tv["def"]
+            backSet = tv["def"]
 
         preQueue = Queue()  # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
         preQueue.put((tk, cgDist, preSet))
 
-        postQueue = Queue()
-        postQueue.put((tk, cgDist, postSet))
+        backQueue = Queue()
+        backQueue.put((tk, cgDist, backSet))
 
         # 前向污点分析
         while not preQueue.empty():
@@ -484,8 +484,8 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
 
         # 后向污点分析
         visited = set()
-        while not postQueue.empty():
-            targetLabel, cgDist, postSet = postQueue.get()
+        while not backQueue.empty():
+            targetLabel, cgDist, backSet = backQueue.get()
 
             if targetLabel in visited:
                 continue
@@ -493,9 +493,9 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             if cgDist > 100:
                 continue
 
-            print("Post analyzing " + targetLabel + "..., cgDist: ", cgDist)
+            print("Back analyzing " + targetLabel + "..., cgDist: ", cgDist)
 
-            targetLabel = getbbPostTainted(targetLabel, postSet)
+            targetLabel = getbbBackTainted(targetLabel, backSet)
 
             func = BB_FUNC_DICT[targetLabel]
             cfg = "cfg." + func + ".dot"
@@ -511,6 +511,10 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             for node in nodes:
                 nodeLabel = node.get("label").lstrip("\"{").rstrip(":}\"")
                 nodeName = node.obj_dict["name"]
+
+                if len(nodeLabel.split(":")) > 2:
+                    nodeLabel = ":".join(nodeLabel.split(":")[0:2])
+
                 try:
                     if nodeName == targetName:
                         distance = cgDist
@@ -526,19 +530,22 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                 node = pq.get()
                 distance, bbname = node.distance, node.label
 
-                # 同一宽度时, 根据每个bb的def-use对postSet的拷贝bbDuSet进行更新, 并将结果都存入bbSumDuSet
-                # 不同宽度时, 将bbSumDuSet的值拷贝到postSet
+                # 同一宽度时, 根据每个bb的def-use对backSet的拷贝bbDuSet进行更新, 并将结果都存入bbSumDuSet
+                # 不同宽度时, 将bbSumDuSet的值拷贝到backSet
                 if distance != nowDist:
                     nowDist = distance
-                    postSet = bbSumDuSet.copy()
+                    backSet = bbSumDuSet.copy()
                     bbSumDuSet.clear()
 
                 if distance == cgDist:
                     isTainted = True
-                    bbSumDuSet = postSet.copy()
+                    bbSumDuSet = backSet.copy()
                 else:
-                    isTainted, bbDuSet = isPostTainted(bbname, postSet, postQueue, distance)
+                    try:
+                        isTainted, bbDuSet = isBackTainted(bbname, backSet, backQueue, distance)
                     bbSumDuSet |= bbDuSet
+                    except:
+                        isTainted = False
 
                 # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
