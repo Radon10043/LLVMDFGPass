@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-04-24 14:39:58
+LastEditTime: 2022-05-20 18:13:17
 Description: Hi, say something
 '''
 import argparse
@@ -391,8 +391,10 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
 
             print("Pre analyzing " + targetLabel + "..., cgDist: ", cgDist)
 
+            # TODO: 目前遇到结构体数组会出错, 因为获取定义-使用关系时是根据指令的op获取变量名
+            # 但LLVM在遇到结构体数组时似乎不会把它当作一个op, 目前还没想到解决办法
             try:
-            targetLabel = getbbPreTainted(targetLabel, preSet)
+                targetLabel = getbbPreTainted(targetLabel, preSet)
             except:
                 continue
 
@@ -448,9 +450,11 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                     isTainted = True
                     bbSumDuSet = preSet.copy()
                 else:
+                    # 有的基本块是LLVM自动补充的, 和源文件的位置对应不上, 分析它是否受污染的话会出错
+                    # 因此这种基本块默认为没有受污染
                     try:
-                    isTainted, bbDuSet = isPreTainted(bbname, preSet)
-                    bbSumDuSet |= bbDuSet
+                        isTainted, bbDuSet = isPreTainted(bbname, preSet)
+                        bbSumDuSet |= bbDuSet
                     except:
                         isTainted = False
 
@@ -541,9 +545,11 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                     isTainted = True
                     bbSumDuSet = backSet.copy()
                 else:
+                    # 有的基本块是LLVM自动补充的, 和源文件的位置对应不上, 分析它是否受污染的话会出错
+                    # 因此这种基本块默认为没有受污染
                     try:
                         isTainted, bbDuSet = isBackTainted(bbname, backSet, backQueue, distance)
-                    bbSumDuSet |= bbDuSet
+                        bbSumDuSet |= bbDuSet
                     except:
                         isTainted = False
 
@@ -569,6 +575,13 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             f.write(bb + "," + str(fit) + "\n")
 
 
+# TODO: 不记录 cgDist > 100的各块信息?
+# 因为若cgDist > 100, distance > 100, fitness < 0.01, 太小了
+# 可以把最大限度的cgDist作为一个命令行参数
+
+# TODO: AFLGo有个bug: 同名函数的控制流图只能存一个, 所以可能会导致信息丢失
+# 如果要解决的话, 我认为最简单的解决方案是, CFG的名字改为: cfg.filename.function.dot
+# 但即使这样, 也无法避免同文件中有相同函数名时会造成信息丢失的现象
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--path", help="存储json, txt等文件的目录", required=True)
