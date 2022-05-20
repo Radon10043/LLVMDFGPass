@@ -3,15 +3,18 @@ build/
 dfg-files*/
 out-files/
 temp/
+exp-data/
 
 pyscripts/*.txt
 
 *.json
+*.md
 
 *.s
 *.ll
 *.out
 *.dot
+*.gch
 
 *.out.*
 *.ll.*
