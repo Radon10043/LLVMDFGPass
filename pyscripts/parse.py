@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-05-20 18:13:17
+LastEditTime: 2022-05-23 17:45:12
 Description: Hi, say something
 '''
 import argparse
@@ -25,8 +25,8 @@ DU_VAR_DICT = dict()  # <行, <def/use, {变量}>>
 BB_LINE_DICT = dict()  # <bb名, 它所包含的所有行>
 BB_FUNC_DICT = dict()  # <bb名, 它所在的函数>
 FUNC_ENTRY_DICT = dict()  # <函数名, 它的入口BB名字>
-FUNC_PARAM_DICT = dict() # <函数名, [形参列表]>
-CALL_ARGS_DICT = dict() # <行, <被调用的函数, [[实参]]>>
+FUNC_PARAM_DICT = dict()  # <函数名, [形参列表]>
+CALL_ARGS_DICT = dict()  # <行, <被调用的函数, [[实参]]>>
 LINE_CALLS_PRE_DICT = dict()  # <调用的函数, <行, <形参, {实参}>>>
 LINE_CALLS_BACK_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
@@ -374,10 +374,12 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             backSet = tv["def"]
 
         preQueue = Queue()  # 该队列的元素是一个三元组, 第一个元素是待分析的可以到达污点源的行, 第二个元素是函数间的距离, 第三个元素是受污染的变量
-        preQueue.put((tk, cgDist, preSet))
+        if len(preSet):  # preSet为空时就不加入前向队列了, 因为没有意义
+            preQueue.put((tk, cgDist, preSet))
 
         backQueue = Queue()
-        backQueue.put((tk, cgDist, backSet))
+        if len(backSet):  # backSet为空时就不要加入后向队列里了, 因为没有意义
+            backQueue.put((tk, cgDist, backSet))
 
         # 前向污点分析
         while not preQueue.empty():
@@ -396,6 +398,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             try:
                 targetLabel = getbbPreTainted(targetLabel, preSet)
             except:
+                print("Hm, struct array?")
                 continue
 
             func = BB_FUNC_DICT[targetLabel]
