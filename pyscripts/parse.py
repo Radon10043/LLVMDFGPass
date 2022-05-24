@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-05-23 17:45:12
+LastEditTime: 2022-05-24 11:45:55
 Description: Hi, say something
 '''
 import argparse
@@ -184,7 +184,7 @@ def getbbPreTainted(loc: str, preSet: set):
     -----
     _description_
     """
-    preSet |= DU_VAR_DICT[loc]["use"]  # 取并集
+    # preSet |= DU_VAR_DICT[loc]["use"]  # 取并集
 
     filename, line = loc.split(":")
     line = int(line)
