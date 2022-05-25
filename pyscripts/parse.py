@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-05-24 11:45:55
+LastEditTime: 2022-05-25 12:30:38
 Description: Hi, say something
 '''
 import argparse
@@ -184,7 +184,7 @@ def getbbPreTainted(loc: str, preSet: set):
     -----
     _description_
     """
-    # preSet |= DU_VAR_DICT[loc]["use"]  # 取并集
+    # preSet |= DU_VAR_DICT[loc]["use"]  # 取并集, 为啥要这么做来着?
 
     filename, line = loc.split(":")
     line = int(line)
@@ -513,6 +513,10 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             nodes = cfgdot.get_nodes()
 
             targetName = getNodeName(nodes, targetLabel)
+
+            # 若无法获取target的name, 跳过
+            if len(targetName) == 0:
+                continue
 
             # 获取以污点源为起点, 能被它到达的基本块, 达成后向污点分析的效果
             for node in nodes:
