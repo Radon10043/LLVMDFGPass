@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-05-25 12:30:38
+LastEditTime: 2022-06-21 18:15:51
 Description: Hi, say something
 '''
 import argparse
@@ -31,6 +31,8 @@ LINE_CALLS_PRE_DICT = dict()  # <调用的函数, <行, <形参, {实参}>>>
 LINE_CALLS_BACK_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
 MAX_LINE_DICT = dict()  # <文件名, 其最大行数>
+
+MAX_CONCERN_DIST = 64
 
 
 class MyNode:
@@ -269,7 +271,7 @@ def getNodeName(nodes, nodeLabel) -> str:
     return ""
 
 
-def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
+def distanceCalculation(path: str, dotPath: str, tSrcsFile: str):
     """计算各基本块的适应度
 
     Parameters
@@ -284,7 +286,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
     _description_
     """
     tSrcs = dict()
-    fitDict = dict()  # <bb名, 适应度数组>
+    distDict = dict()  # <bb名, 适应度数组>
     resDict = dict()  # <bb名, 适应度>
     index = 0  # 下标
 
@@ -388,7 +390,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             if targetLabel in visited:
                 continue
 
-            if cgDist > 100:
+            if cgDist > MAX_CONCERN_DIST:
                 continue
 
             print("Pre analyzing " + targetLabel + "..., cgDist: ", cgDist)
@@ -461,16 +463,22 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                     except:
                         isTainted = False
 
-                # 若被污染了, 计算适应度, 加入dict
+                # 跳过距离超过MAX_CONCERN_DIST的基本块
+                if distance > MAX_CONCERN_DIST:
+                    continue
+
+                # 若被污染了, 加入distDict
                 if isTainted:
-                    if not bbname in fitDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
-                        fitDict[bbname] = [0] * len(tSrcs)
-                    fitness = 1 / (1 + distance)
-                    fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
+                    if not bbname in distDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
+                        distDict[bbname] = [-1] * len(tSrcs)
+                    if distDict[bbname][index] == -1:   # 初始值是-1, -1表示没有被第index个变更点污染
+                        distDict[bbname][index] = distance
+                    else:
+                        distDict[bbname][index] = min(distDict[bbname][index], distance)
 
             cgDist += nx.shortest_path_length(cfgnx, entryName, targetName)
 
-            # 如果没有函数调用里func, 证明前向分析到头了, 不需要再往队列里添加元素了
+            # 如果没有函数调用了func, 证明前向分析到头了, 不需要再往队列里添加元素了
             if not func in LINE_CALLS_PRE_DICT.keys():
                 continue
 
@@ -497,7 +505,7 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
             if targetLabel in visited:
                 continue
 
-            if cgDist > 100:
+            if cgDist > MAX_CONCERN_DIST:
                 continue
 
             print("Back analyzing " + targetLabel + "..., cgDist: ", cgDist)
@@ -560,12 +568,18 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
                     except:
                         isTainted = False
 
+                # 跳过距离超过MAX_CONCERN_DIST的基本块
+                if distance > MAX_CONCERN_DIST:
+                    continue
+
                 # 若被污染了, 计算适应度, 加入dict
                 if isTainted:
-                    if not bbname in fitDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
-                        fitDict[bbname] = [0] * len(tSrcs)
-                    fitness = 1 / (1 + distance)
-                    fitDict[bbname][index] = max(fitDict[bbname][index], fitness)
+                    if not bbname in distDict.keys():  # 将value初始化为长度为len(tSrcs)的列表
+                        distDict[bbname] = [-1] * len(tSrcs)
+                    if distDict[bbname][index] == -1:   # 初始值是-1, -1表示没有被第index个变更点污染
+                        distDict[bbname][index] = distance
+                    else:
+                        distDict[bbname][index] = min(distDict[bbname][index], distance)
 
             visited.add(targetLabel)
 
@@ -573,17 +587,16 @@ def fitnessCalculation(path: str, dotPath: str, tSrcsFile: str):
 
     print("Calculating average ...")
 
-    for bb, fits in fitDict.items():
-        fits = [fit for fit in fits if fit > 0]
-        resDict[bb] = mean(fits)
+    for bb, dists in distDict.items():
+        dists = [dist for dist in dists if dist != -1]
+        resDict[bb] = min(dists)
 
-    with open(path + "/fitness.cfg.txt", mode="w") as f:
-        for bb, fit in resDict.items():
-            f.write(bb + "," + str(fit) + "\n")
+    with open(path + "/myDist.cfg.txt", mode="w") as f:
+        for bb, dist in resDict.items():
+            f.write(bb + "," + str(dist) + "\n")
 
 
-# TODO: 不记录 cgDist > 100的各块信息?
-# 因为若cgDist > 100, distance > 100, fitness < 0.01, 太小了
+# TODO: 不记录 cgDist > 64的各块信息
 # 可以把最大限度的cgDist作为一个命令行参数
 
 # TODO: AFLGo有个bug: 同名函数的控制流图只能存一个, 所以可能会导致信息丢失
@@ -597,6 +610,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     start = time.time()
-    fitnessCalculation(args.path, args.dot, args.taint)
+    distanceCalculation(args.path, args.dot, args.taint)
     end = time.time()
     print("Calculation is finished, consumed %f seconds." % (end - start))
