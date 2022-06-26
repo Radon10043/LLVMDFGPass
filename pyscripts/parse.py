@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-06-21 18:18:32
+LastEditTime: 2022-06-26 17:10:31
 Description: Hi, say something
 '''
 import argparse
@@ -300,13 +300,9 @@ def distanceCalculation(path: str, dotPath: str, tSrcsFile: str):
 
             if "def" in v.keys():
                 v["def"] = set(v["def"])
-            else:
-                v["def"] = set()
 
             if "use" in v.keys():
                 v["use"] = set(v["use"])
-            else:
-                v["use"] = set()
 
     with open(path + "/bbLine.json") as f:  # 读取基本块和它所有报行的行的json文件
         BB_LINE_DICT = json.load(f)
@@ -556,17 +552,16 @@ def distanceCalculation(path: str, dotPath: str, tSrcsFile: str):
                     backSet = bbSumDuSet.copy()
                     bbSumDuSet.clear()
 
+                # 有的基本块是LLVM自动补充的, 和源文件的位置对应不上, 分析它是否受污染的话会出错
+                # 因此这种基本块默认为没有受污染
+                try:
+                    isTainted, bbDuSet = isBackTainted(bbname, backSet, backQueue, distance)
+                    bbSumDuSet |= bbDuSet
+                except:
+                    isTainted = False
+
                 if distance == cgDist:
                     isTainted = True
-                    bbSumDuSet = backSet.copy()
-                else:
-                    # 有的基本块是LLVM自动补充的, 和源文件的位置对应不上, 分析它是否受污染的话会出错
-                    # 因此这种基本块默认为没有受污染
-                    try:
-                        isTainted, bbDuSet = isBackTainted(bbname, backSet, backQueue, distance)
-                        bbSumDuSet |= bbDuSet
-                    except:
-                        isTainted = False
 
                 # 跳过距离超过MAX_CONCERN_DIST的基本块
                 if distance > MAX_CONCERN_DIST:
