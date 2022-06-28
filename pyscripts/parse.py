@@ -2,7 +2,7 @@
 Author: Radon
 Date: 2022-02-05 16:20:42
 LastEditors: Radon
-LastEditTime: 2022-06-26 17:10:31
+LastEditTime: 2022-06-28 09:45:41
 Description: Hi, say something
 '''
 import argparse
@@ -32,7 +32,7 @@ LINE_CALLS_BACK_DICT = dict()  # <行, <调用的函数, <形参, {实参}>>>
 LINE_BB_DICT = dict()  # <行, 其所在基本块>
 MAX_LINE_DICT = dict()  # <文件名, 其最大行数>
 
-MAX_CONCERN_DIST = 64
+MAX_CONCERN_DIST = 63
 
 
 class MyNode:
